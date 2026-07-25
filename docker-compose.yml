@@ -1,0 +1,18 @@
+# Portainer stack definition.
+#
+# Option A (build on the host / via Portainer's "build" support):
+#   docker compose up -d --build
+#
+# Option B (Portainer stack from a Git repo): point the stack at this repo;
+# Portainer will build the image from the Dockerfile in the repo root.
+#
+# If your Portainer cannot build, pre-build and push the image, then replace
+# `build: .` with `image: your-registry/snorcapaint:latest`.
+services:
+  snorcapaint:
+    build: .
+    image: snorcapaint:latest
+    container_name: snorcapaint
+    ports:
+      - "8080:80"
+    restart: unless-stopped

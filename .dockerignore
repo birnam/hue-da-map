@@ -1,0 +1,7 @@
+.git
+node_modules
+test
+*.3mf
+*-snorcapaint.3mf
+CLAUDE.md
+README.md

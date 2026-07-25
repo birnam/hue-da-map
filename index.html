@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3MF → snorca paint</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <main>
+    <h1>3MF&nbsp;→&nbsp;snorca&nbsp;paint</h1>
+    <p class="lede">Drop one or more colored 3MFs (OpenSCAD <code>basematerials</code> / <code>colorgroup</code>)
+      to convert them into Snapmaker&nbsp;OrcaSlicer projects with <code>paint_color</code> regions.
+      Everything runs in your browser — no upload.</p>
+
+    <label class="field" for="suffix">Output filename suffix
+      <input id="suffix" type="text" value="-snorcapaint" spellcheck="false" autocomplete="off" />
+    </label>
+
+    <div id="drop" class="dropzone" tabindex="0" role="button" aria-label="Drop .3mf files or click to choose">
+      <div class="dz-inner">
+        <div class="dz-icon">⬇</div>
+        <div class="dz-text">Drop <code>.3mf</code> files here<br /><span>or click to choose (multiple allowed)</span></div>
+      </div>
+    </div>
+    <input id="file" type="file" accept=".3mf" multiple hidden />
+
+    <p id="status" role="status" aria-live="polite"></p>
+    <div id="result" hidden></div>
+  </main>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
