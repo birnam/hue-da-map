@@ -113,11 +113,35 @@ src/style.css
 src/templates/             working snorca files lifted from colored-cube.3mf
   project_settings.base.json
   slice_info.base.xml
+bin/convert.mjs            CLI wrapper (same pipeline as the browser)
+package.json               scripts + bin entry (no runtime deps)
 test/sanity.mjs            Node end-to-end test + validation
 Dockerfile, nginx.conf, docker-compose.yml
 ```
-`convert.js`/`zip.js` are DOM-free and run under Node, which is how the test
-exercises the full pipeline without a browser.
+`convert.js`/`zip.js` are DOM-free and run under Node, so the CLI and the test
+reuse the exact same pipeline as the browser — no logic is duplicated.
+
+### CLI
+```bash
+pnpm convert <input.3mf...> [-o [<output.3mf>]] [-s <suffix>] [-q]
+# equivalently: node bin/convert.mjs ... , or the bin: 3mf-snorcapaint ...
+```
+The output destination depends on `-o`:
+
+| Invocation | Result |
+|---|---|
+| `convert in.3mf` | stream the 3MF to **stdout** (single input) |
+| `convert in.3mf > out.3mf` | shell redirect → `out.3mf` |
+| `convert in.3mf -o out.3mf` | write to the explicit path (single input) |
+| `convert in.3mf -o` | derive `in<suffix>.3mf` (bare `-o`; works with many inputs) |
+| `convert *.3mf -o -s -u1` | batch, derive names with a custom suffix |
+
+- **All informational output (summary, warnings, pnpm's own logging) goes to
+  stderr**, so `> file` and pipes stay clean binary streams. `-q` silences the
+  per-file summary.
+- Stdout mode and explicit `-o <path>` require a single input; bare `-o` is the
+  way to batch. Per-file failures print to stderr and set a non-zero exit code.
+- No dependency install needed — `pnpm convert` runs the script directly.
 
 ### Run / develop
 ```bash
