@@ -8,8 +8,9 @@
   },
   "scripts": {
     "convert": "node bin/convert.mjs",
-    "test": "node test/sanity.mjs",
-    "serve": "node --version >/dev/null && python3 -m http.server 8080"
+    "test": "node test/sanity.mjs && node test/phase3.mjs",
+    "test:browser": "node test/browser-run.mjs && node test/smoke-index.mjs",
+    "serve": "python3 -m http.server 8080"
   },
   "engines": {
     "node": ">=18"

@@ -72,10 +72,11 @@ These live in `src/convert.js` as `PAINT_CODES`.
    leaf" codes because our input is one color per whole triangle.)
 2. **`BED_CENTER`** (`convert.js`) = `[135.5, 136]`, taken from the reference.
    Confirm the U1 plate origin; positioning is cosmetic (user can re-drop).
-3. **Print profile.** Output reuses the reference's `project_settings.config`
-   verbatim except for `filament_colour`/`filament_multi_colors`. The embedded
-   printer/process is a Bambu profile placeholder — snorca users switch printer.
-   If snorca rejects/repairs it, trim the template to essentials.
+3. **Print profile.** ~~Placeholder Bambu profile.~~ RESOLVED in phase 3: output now
+   uses the **genuine "Snapmaker U1" `project_settings.config`** extracted from bl2u1's
+   `u1_template.3mf` (`src/templates/project_settings.base.json`, + supports variant),
+   with only `filament_colour`/`filament_multi_colors` overridden and all `filament_*`
+   arrays normalized to 4.
 4. **Thumbnails** are intentionally omitted (snorca regenerates them). If snorca
    complains about missing previews, generate placeholder PNGs.
 
@@ -105,21 +106,33 @@ slots padded gray). Phase 2 replaces this with an interactive mapping.
 
 ### Layout
 ```
-index.html                 UI shell
-src/main.js                drag-drop, download, summary rendering (browser only)
-src/convert.js             pure conversion: parse 3MF → plan mapping → build snorca project
+index.html                 UI shell (+ importmap for three.js)
+src/main.js                editor orchestration: drop → viewer + matrix → export queue
+src/convert.js             DOM-free pipeline (see functions below)
 src/zip.js                 dependency-free zip read/write (native Compression Streams; handles Zip64 input)
+src/viewer.js              three.js viewer (flat per-triangle colors, input/output recolor, highlight)
+src/matrix.js              the 5-column mapping matrix component
+src/paint.js               Bambu/Orca paint_color decoder (solid-leaf → filament slot)
 src/style.css
-src/templates/             working snorca files lifted from colored-cube.3mf
-  project_settings.base.json
-  slice_info.base.xml
+src/vendor/                vendored three.js ESM (no build step)
+  three.module.js, three.core.js, OrbitControls.js
+src/templates/             genuine Snapmaker U1 profiles (from bl2u1's u1_template*.3mf)
+  project_settings.base.json      real "Snapmaker U1" profile (549 keys)
+  project_settings.supports.json  same, Tree Supports on
+  slice_info.base.xml, filament_map.json (type → U1 settings-id)
 bin/convert.mjs            CLI wrapper (same pipeline as the browser)
 package.json               scripts + bin entry (no runtime deps)
 test/sanity.mjs            Node end-to-end test + validation
+test/browser-run.mjs       headless-chromium runner (Node http server + CDP, no deps)
+test/browser-test.html     in-browser self-test (parse → build → matrix → viewer/WebGL)
 Dockerfile, nginx.conf, docker-compose.yml
 ```
-`convert.js`/`zip.js` are DOM-free and run under Node, so the CLI and the test
-reuse the exact same pipeline as the browser — no logic is duplicated.
+
+`convert.js` exposes the pipeline as composable stages so the CLI, tests, and the
+interactive editor all reuse the exact same logic (no duplication):
+`parseProject` → `planConversion` / `defaultSwatches` + `mappingForSwatches` →
+`buildProjectBytes`; `convert3mf` composes them for the non-interactive path.
+`convert.js`/`zip.js` are DOM-free and run under Node.
 
 ### CLI
 ```bash
@@ -146,11 +159,14 @@ The output destination depends on `-o`:
 ### Run / develop
 ```bash
 # Local dev — any static server works:
-python3 -m http.server 8080      # then open http://localhost:8080
+pnpm serve                       # python3 -m http.server 8080 → http://localhost:8080
 
 # Test the conversion pipeline (no browser):
-node test/sanity.mjs                                   # default sample
+pnpm test                                             # node test/sanity.mjs (default sample)
 node test/sanity.mjs gridfinity-cup-1x1x3U-label-v2.3mf
+
+# Headless browser test (needs a `chromium` binary): parse → build → matrix → WebGL:
+pnpm test:browser
 ```
 
 ### Deploy (microservice / Portainer)
@@ -167,55 +183,138 @@ No bundler, no npm dependencies.
 
 ---
 
-## Phase 2 — NEXT (interactive viewer + color-mapping matrix)
+## Phase 2 — DONE (interactive viewer + color-mapping matrix)
 
-**Goal:** let the user control the >4 → 4 color mapping instead of the automatic
-nearest-color default, with a live 3D preview.
+Dropping file(s) opens an **editor** (no auto-download in the browser); you map
+colors, preview in 3D, then **Export**.
 
-### 3D viewer
-- Render the objects from the 3MF (ignore multi-plate layouts for now — just the
-  objects), painted to show the separate colors.
-- Two overlay toggle buttons: **Input** and **Output**. Toggling recolors the
-  objects to show either the original source coloring or the mapped output
-  coloring. (Likely three.js; the mesh + per-triangle color/slot data already
-  come out of `planConversion` in `convert.js` and can feed the viewer directly.)
+### Flow / queue (`src/main.js`)
+- Files are edited **one at a time** (a queue). The Export button reads
+  "Export & continue" until the last file.
+- An **"Apply to all remaining"** checkbox (default off): exporting also converts
+  every remaining file with the *current* swatches + mapping, no further
+  interaction. Best-effort per file via `mappingForSwatches(painted, swatches,
+  priorMapping)` — same slot for matching input colors, nearest for the rest.
+- Downloads are staggered ~300 ms (multi-download prompt). CLI keeps instant/batch.
 
-### Mapping matrix (a 5×N grid → effectively a column of radio groups)
-- **r1c1**: empty.
-- **r1c2–r1c5**: the four **output** snorca filament swatches.
-  - If the 3MF defines filaments/materials, the first four populate these.
-  - If it defines none, use the first four **painted** colors (from
-    `m:colorgroup`/`basematerials`).
-  - If there are fewer than four defined filaments but more painted colors,
-    supplement with painted colors.
-  - If neither source has enough, show **`X`** (that slot can be ignored).
-  - These swatches are **clickable → color picker**; changing one updates the 3D
-    view when in **Output** mode (and rewrites `filament_colour` on export).
-- **r2c1–rNc1**: the **input** color swatches (not editable). Clicking one can
-  highlight the corresponding triangles in the 3D viewer. This column may exceed
-  four rows (more input colors than the U1 can print).
-- **Body cells (each input row × each output column)**: clickable; exactly one
-  cell per row is "mapped" and filled with that output color. **One output color
-  per row** → each row behaves as a **radio group** selecting the output slot for
-  that input color.
+### 3D viewer (`src/viewer.js`, three.js, vendored)
+- Non-indexed `BufferGeometry` (3 verts/triangle) → flat per-face color; orbit
+  controls; Z-up; auto-fit camera.
+- Overlay **Input / Output** toggle recolors via a provider: input → `tri.hex`,
+  output → `swatches[colorToSlot[tri.hex]-1]`.
+- `setHighlight(hex)` dims all triangles except those of one input color (driven
+  by clicking an input swatch in the matrix).
 
-Export then uses the user's chosen `input color → slot` map in place of the
-automatic nearest-color logic. The plumbing point is `planConversion()` in
-`src/convert.js`: keep its output shape (`colorToSlot`, `slotColors`, `numSlots`)
-and let the UI supply an override.
+### Mapping matrix (`src/matrix.js`)
+Implements the spec exactly:
+- Header: empty corner + 4 **output swatches** (click → color picker; `X` = unused
+  slot, from `defaultSwatches`: defined materials first, supplement with painted,
+  pad null).
+- One row per **input color**: left swatch (click → highlight in 3D), then 4
+  **radio dots** — exactly one selected per row (`colorToSlot`); dots for unused
+  (`X`) slots are disabled.
+- Emits `onChange` (recolor viewer in Output mode + used on export) and `onHighlight`.
 
-### Likely refactor when starting phase 2
-- Split parsing (`parseModelXml`/`collectGeometry`) from planning (`planConversion`)
-  from serialization (already fairly separate) so the viewer and matrix can call
-  parse+plan, mutate the plan, then serialize on demand.
-- Expose the merged geometry (`verts`/`tris` with per-triangle input color) to the
-  viewer.
+### Testing
+- `pnpm test` — Node pipeline/validation (unchanged).
+- `pnpm test:browser` — headless chromium via CDP: parse → build → matrix render +
+  interactions → viewer/WebGL. All green (needs a `chromium` binary).
+
+**Not yet verified by a human:** the live drag-drop UX, the color-picker dialog,
+and the actual file download gesture (headless can't drive these), plus opening
+the result in snorca (the code↔slot verification from phase 1 still stands).
+
+---
+
+## Phase 3 — DONE (Bambu 3MF input + "Target Printer: Snapmaker U1")
+
+Accept **Bambu Studio project 3MFs** in addition to OpenSCAD-colored ones, reuse our
+color-mapping UI, and optionally retarget to the Snapmaker U1 — folding in the useful
+part of `/home/david/projects/bl2u1` (Flask app; reviewed, not copied — clean-room, only
+its Snapmaker-generated template configs reused, since its LICENSE=GPLv3/README=MIT).
+
+### What bl2u1 does (for reference)
+`convert()` streams the input zip through, **rewriting only 3 metadata files** and copying
+all geometry/paint/thumbnails verbatim: replaces `project_settings.config` wholesale with
+a U1 profile + filament overrides; forces `slice_info` `printer_model_id="Snapmaker U1"` +
+rebuilds `<filament>` nodes; remaps `model_settings` `extruder` ids. **No geometry,
+paint_color, or repositioning changes.** It has a latent bug (renumbers filaments but not
+per-triangle `paint_color`), which our rebuild approach avoids.
+
+### Our design (`src/convert.js`)
+- **Auto-detect** input type: `detectInputType(files)` — `bambu` if it has
+  `Metadata/project_settings.config` (or `paint_color`/components), else `openscad`.
+- **`parseAnyProject(bytes)`** returns a common shape for both kinds
+  (`kind, title, verts, tris{hex}, paintedColors, definedColors, rawProjectSettings,
+  rawSliceInfo, hasSupport, complexPaintCount`), so the matrix + viewer are unchanged.
+  Bambu: `src/paint.js` `decodePaintSlot()` turns each triangle's `paint_color` into a
+  filament slot; slot→hex via the file's `filament_colour` palette; part-based color via
+  `model_settings` part `extruder`.
+- **Rebuild, don't patch.** Because our output is one color per triangle, every path goes
+  through `buildProjectBytes` (emits fresh mesh with our `paint_color` + configs). The
+  Bambu paint tree is only *decoded*, never re-encoded — so we never need a tree codec.
+- **Preview thumbnails preserved.** Rebuilding would drop the input's previews, so
+  `collectPreviewFiles()` carries over `Metadata/*.png` + `Auxiliaries/**` verbatim, and
+  the writer re-advertises the plate image as the cover thumbnail (`_rels/.rels` +
+  `model_settings` `thumbnail_file`/`top_file`/`pick_file`). `[Content_Types].xml` is
+  generated to cover every preserved extension.
+- **Compressed output.** `zip.js` `zipDeflate()` writes DEFLATE (per-entry best-of vs.
+  store), so outputs stay small despite embedding the 34 KB U1 profile + thumbnails
+  (e.g. the gridfinity U1 output is ~43 KB vs ~317 KB stored). `buildProjectBytes` is
+  therefore `async`.
+- **`chooseProjectSettings(parsed, target, {u1Base,u1Supports})`** selects the profile:
+  OpenSCAD→U1; Bambu+`keep`→its own profile; Bambu+`u1`→U1 (supports variant if input
+  had supports). `buildProjectBytes` normalizes all `filament_*` arrays to 4.
+- **`convertProject(bytes, {target, u1Base, u1Supports})`** — non-interactive, used by CLI.
+
+### UI (`index.html`, `src/main.js`)
+- **Printer profile** `<select>` beside the suffix (50/50 row): `No change` (value `keep`,
+  default) / `Snapmaker U1` (value `u1`). Editor uses `parseAnyProject`; export routes via
+  `chooseProjectSettings`. A load-info line notes the kind, profile effect, and any
+  flattened-paint warning.
+- **`No change`** = do the color fix but **don't inject/modify a printer profile**:
+  - OpenSCAD → a minimal palette-only `project_settings` (`MINIMAL_PROJECT_SETTINGS`, no
+    `printer_model`), so the file stays portable to whatever slicer/printer the user opens
+    it with (Bambu / Orca main / snorca). *(Openability + paint rendering in Bambu/Orca
+    main with a printer-less profile is UNVERIFIED — confirm and adjust if needed.)*
+  - Bambu → preserve the source's own `project_settings` verbatim (only `filament_colour`
+    overridden). Its printer is unchanged, so opening in the Snapmaker Orca fork may flag
+    Bambu-vs-Orca schema differences (e.g. `ensure_vertical_shell_thickness
+    "enabled"→"ensure_all"`, `raft_first_layer_expansion -1 not in range`). That's
+    expected — **pick `Snapmaker U1` for a clean, print-ready U1 file.**
+- **`Snapmaker U1`** = add/replace with the genuine U1 profile (supports variant if the
+  Bambu source had supports). This is what bl2u1 always does (`combined = u1_settings.copy()`
+  — no per-key migration exists to port).
+- **Preview preservation:** `_rels/.rels` now **reproduces the source's own
+  thumbnail/cover relationships** (`parseCoverRels`) so the original preview image is kept,
+  rather than forcing the plate render; falls back to the plate image only if the source
+  declared no cover. Target files are carried in `collectPreviewFiles` (incl. cover-rel
+  targets). `model_settings` still points its plate thumbnails at `plate_*.png`.
+
+### CLI: `--target keep|u1` (default `keep`).
+
+### Known limitations
+- **Sub-triangle (brush) painting** in a Bambu file flattens to the triangle's base color
+  with a warning (`complexPaintCount`) — we decode only **solid-leaf** `paint_color` codes
+  (slots 1-4: `none/8/0C/1C`). Codes for slots >4 and subdivided bitstreams are not yet
+  reverse-engineered; completing them needs reference files (a brush-painted,
+  boundary-subdividing model; a >4-filament model) and a full encoder.
+- Part-based color beyond simple `part id → extruder` (multi-object) is best-effort.
+- `keep` rebuilds via one merged object, so multi-object/multi-part structure and
+  non-color `model_settings` are not preserved (consistent with our merge scope).
+
+### Tests
+- `pnpm test` = `test/sanity.mjs` (+ genuine U1 profile) **and** `test/phase3.mjs`
+  (detection, paint decode, input×target matrix). `pnpm test:browser` adds Bambu
+  detect/parse in headless chromium. **Not human-verified:** opening Bambu→U1 /
+  Bambu→keep / OpenSCAD→U1 outputs in snorca.
 
 ---
 
 ## Not doing yet
-- Multi-plate / multi-object plate layouts (just render objects).
-- "Painted regions → separate parts" export (the other conversion strategy we
-  discussed; more robust but more work — revisit after phase 2).
-- Baking object/component transforms (input assumed identity, true for the
-  OpenSCAD exports).
+- Multi-plate / multi-object plate layouts (just render/merge objects).
+- Preserving Bambu sub-triangle painting (needs the full paint bitstream codec +
+  reference files) and slots >4.
+- "Painted regions → separate parts" export.
+- Baking object/component transforms (input assumed identity).
+- Per-file mapping memory across the queue beyond the "apply to all" carry-over.

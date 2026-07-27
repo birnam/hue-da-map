@@ -109,37 +109,37 @@ export async function unzip(buf) {
   return files;
 }
 
-/**
- * Build a ZIP archive (STORE) from an ordered list of entries.
- * @param {{name:string, data:Uint8Array}[]} entries
- * @returns {Uint8Array}
- */
-export function zipStore(entries) {
+async function deflateRaw(bytes) {
+  const cs = new CompressionStream('deflate-raw');
+  const stream = new Blob([bytes]).stream().pipeThrough(cs);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Core writer. `records` carry the final stored bytes + method/crc/uncompressed size.
+function writeZip(records) {
   const enc = new TextEncoder();
   const local = [];
   const central = [];
   let offset = 0;
 
-  for (const { name, data } of entries) {
+  for (const { name, stored, method, crc, uncompSize } of records) {
     const nameBytes = enc.encode(name);
-    const crc = crc32(data);
-    const size = data.length;
 
     const lh = new Uint8Array(30 + nameBytes.length);
     const ldv = new DataView(lh.buffer);
     ldv.setUint32(0, 0x04034b50, true);
-    ldv.setUint16(4, 20, true);   // version needed
-    ldv.setUint16(6, 0, true);    // flags
-    ldv.setUint16(8, 0, true);    // method: store
-    ldv.setUint16(10, 0, true);   // mod time
-    ldv.setUint16(12, 0, true);   // mod date
+    ldv.setUint16(4, 20, true);          // version needed
+    ldv.setUint16(6, 0, true);           // flags
+    ldv.setUint16(8, method, true);      // 0 = store, 8 = deflate
+    ldv.setUint16(10, 0, true);          // mod time
+    ldv.setUint16(12, 0, true);          // mod date
     ldv.setUint32(14, crc, true);
-    ldv.setUint32(18, size, true);
-    ldv.setUint32(22, size, true);
+    ldv.setUint32(18, stored.length, true);  // compressed size
+    ldv.setUint32(22, uncompSize, true);      // uncompressed size
     ldv.setUint16(26, nameBytes.length, true);
     ldv.setUint16(28, 0, true);
     lh.set(nameBytes, 30);
-    local.push(lh, data);
+    local.push(lh, stored);
 
     const ch = new Uint8Array(46 + nameBytes.length);
     const cdv = new DataView(ch.buffer);
@@ -147,12 +147,12 @@ export function zipStore(entries) {
     cdv.setUint16(4, 20, true);
     cdv.setUint16(6, 20, true);
     cdv.setUint16(8, 0, true);
-    cdv.setUint16(10, 0, true);
+    cdv.setUint16(10, method, true);
     cdv.setUint16(12, 0, true);
     cdv.setUint16(14, 0, true);
     cdv.setUint32(16, crc, true);
-    cdv.setUint32(20, size, true);
-    cdv.setUint32(24, size, true);
+    cdv.setUint32(20, stored.length, true);
+    cdv.setUint32(24, uncompSize, true);
     cdv.setUint16(28, nameBytes.length, true);
     cdv.setUint16(30, 0, true);
     cdv.setUint16(32, 0, true);
@@ -163,7 +163,7 @@ export function zipStore(entries) {
     ch.set(nameBytes, 46);
     central.push(ch);
 
-    offset += lh.length + data.length;
+    offset += lh.length + stored.length;
   }
 
   const cdStart = offset;
@@ -171,8 +171,8 @@ export function zipStore(entries) {
   const eocd = new Uint8Array(22);
   const edv = new DataView(eocd.buffer);
   edv.setUint32(0, 0x06054b50, true);
-  edv.setUint16(8, entries.length, true);
-  edv.setUint16(10, entries.length, true);
+  edv.setUint16(8, records.length, true);
+  edv.setUint16(10, records.length, true);
   edv.setUint32(12, cdSize, true);
   edv.setUint32(16, cdStart, true);
 
@@ -182,4 +182,33 @@ export function zipStore(entries) {
   let q = 0;
   for (const c of parts) { out.set(c, q); q += c.length; }
   return out;
+}
+
+/**
+ * Build a ZIP archive (STORE) from an ordered list of entries.
+ * @param {{name:string, data:Uint8Array}[]} entries
+ * @returns {Uint8Array}
+ */
+export function zipStore(entries) {
+  return writeZip(entries.map(({ name, data }) => ({ name, stored: data, method: 0, crc: crc32(data), uncompSize: data.length })));
+}
+
+/**
+ * Build a ZIP archive with DEFLATE compression (per-entry best-of vs. STORE, so
+ * already-compressed data like PNGs never grows). Async: uses CompressionStream.
+ * @param {{name:string, data:Uint8Array}[]} entries
+ * @returns {Promise<Uint8Array>}
+ */
+export async function zipDeflate(entries) {
+  const records = [];
+  for (const { name, data } of entries) {
+    const crc = crc32(data);
+    let stored = data, method = 0;
+    if (data.length > 0) {
+      const comp = await deflateRaw(data);
+      if (comp.length < data.length) { stored = comp; method = 8; }
+    }
+    records.push({ name, stored, method, crc, uncompSize: data.length });
+  }
+  return writeZip(records);
 }

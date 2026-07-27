@@ -1,119 +1,203 @@
-// Browser entry point: drag-and-drop colored 3MF file(s), get snorca-painted 3MFs.
-import { convert3mf, outputName, DEFAULT_SUFFIX } from './convert.js';
+// Browser entry point (phase 2): drop 3MF file(s) → interactive viewer + mapping
+// matrix → Export. Multiple files are edited one at a time (a queue); an
+// "Apply to all" checkbox best-effort applies the current settings to the rest.
+import {
+  parseAnyProject, defaultSwatches, mappingForSwatches, buildProjectBytes,
+  chooseProjectSettings, outputName, DEFAULT_SUFFIX,
+} from './convert.js';
+import { Viewer } from './viewer.js';
+import { MappingMatrix } from './matrix.js';
 
-const drop = document.getElementById('drop');
-const fileInput = document.getElementById('file');
-const suffixInput = document.getElementById('suffix');
-const status = document.getElementById('status');
-const result = document.getElementById('result');
+const $ = (id) => document.getElementById(id);
+const drop = $('drop');
+const fileInput = $('file');
+const suffixInput = $('suffix');
+const targetSel = $('target');
+const status = $('status');
+const result = $('result');
+const editor = $('editor');
+const canvas = $('canvas');
+const matrixEl = $('matrix');
+const queueLabel = $('queue');
+const editInfo = $('editinfo');
+const applyAll = $('applyAll');
+const exportBtn = $('export');
+const modeInput = $('mode-input');
+const modeOutput = $('mode-output');
 
-// Load the working snorca templates once (served alongside this module).
 const templatesReady = Promise.all([
   fetch(new URL('./templates/project_settings.base.json', import.meta.url)).then((r) => r.text()),
-  fetch(new URL('./templates/slice_info.base.xml', import.meta.url)).then((r) => r.text()),
+  fetch(new URL('./templates/project_settings.supports.json', import.meta.url)).then((r) => r.text()),
 ]);
 
-function setStatus(msg, kind = '') {
-  status.className = kind;
-  status.textContent = msg;
-}
+let viewer = null;
+let matrix = null;
+let queue = [];        // File[]
+let idx = 0;
+let current = null;    // parsed project for queue[idx]
+let mode = 'input';    // 'input' | 'output'
+let converted = 0;
 
-// Strip characters that are invalid/awkward in file names; fall back to default.
+function setStatus(msg, kind = '') { status.className = kind; status.textContent = msg; }
+
 function currentSuffix() {
   const raw = suffixInput.value.replace(/[\\/:*?"<>|]/g, '').trim();
-  return raw;
+  return raw || DEFAULT_SUFFIX;
 }
 
 function download(bytes, name) {
   const url = URL.createObjectURL(new Blob([bytes], { type: 'model/3mf' }));
   const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 8000);
 }
 
-// Trigger downloads with a short stagger. The second+ download in quick
-// succession is what makes the browser show its "Download multiple files?"
-// permission prompt; once allowed, the rest proceed automatically.
-async function downloadAll(items) {
-  for (let i = 0; i < items.length; i++) {
-    download(items[i].bytes, items[i].name);
-    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 300));
+// --- viewer coloring providers ---
+function applyProvider() {
+  if (!viewer) return;
+  if (mode === 'input') {
+    viewer.setProvider((t) => t.hex);
+  } else {
+    const { swatches, colorToSlot } = matrix.getState();
+    viewer.setProvider((t) => swatches[colorToSlot[t.hex] - 1] || '#808080');
   }
 }
 
-const swatch = (hex) => `<span class="sw" style="background:${hex}"></span>`;
-
-function fileCard({ name, summary, bytes }) {
-  const rows = summary.mapping.map((m) =>
-    `<tr><td>${swatch(m.input)}<code>${m.input}</code></td>` +
-    `<td>slot ${m.slot} ${summary.slotColors[m.slot - 1] ? swatch(summary.slotColors[m.slot - 1]) : ''}</td></tr>`
-  ).join('');
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.innerHTML = `
-    <div class="ok">✓ <strong>${name}</strong></div>
-    <div class="meta">${summary.triangles} triangles · ${summary.inputColors.length} input color(s) → ${summary.numSlots} slot(s)</div>
-    <table class="map"><tbody>${rows}</tbody></table>
-    <button type="button" class="small">Download again</button>`;
-  card.querySelector('button').addEventListener('click', () => download(bytes, name));
-  return card;
+function setMode(m) {
+  mode = m;
+  modeInput.classList.toggle('active', m === 'input');
+  modeOutput.classList.toggle('active', m === 'output');
+  applyProvider();
 }
 
-function fileError(name, message) {
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.innerHTML = `<div class="err">✗ <strong>${name}</strong></div><div class="meta">${message}</div>`;
-  return card;
+function refreshExportLabel() {
+  const last = idx >= queue.length - 1;
+  exportBtn.textContent = applyAll.checked
+    ? (queue.length - idx > 1 ? `Export all ${queue.length - idx} remaining` : 'Export')
+    : (last ? 'Export' : 'Export & continue');
+  queueLabel.textContent = queue.length > 1 ? `File ${idx + 1} of ${queue.length}` : '';
+}
+
+async function loadCurrent() {
+  const file = queue[idx];
+  setStatus(`Loading ${file.name}…`);
+  try {
+    current = await parseAnyProject(new Uint8Array(await file.arrayBuffer()));
+  } catch (err) {
+    console.error(err);
+    setStatus(`Could not read ${file.name}: ${err.message}`, 'err');
+    // Skip this file.
+    if (++idx < queue.length) return loadCurrent();
+    return finish();
+  }
+
+  // Reveal the editor first so the canvas has real dimensions at viewer init.
+  drop.hidden = true;
+  editor.hidden = false;
+  result.hidden = true;
+
+  if (!viewer) viewer = new Viewer(canvas);
+  viewer.setModel(current.verts, current.tris);
+
+  const swatches = defaultSwatches(current.definedColors, current.paintedColors);
+  const colorToSlot = mappingForSwatches(current.paintedColors, swatches);
+  if (!matrix) {
+    matrix = new MappingMatrix(matrixEl, {
+      onChange: () => { if (mode === 'output') applyProvider(); },
+      onHighlight: (hex) => viewer.setHighlight(hex),
+    });
+  }
+  matrix.setData({ inputColors: current.paintedColors, swatches, colorToSlot });
+  setStatus('');
+  setMode(mode);            // re-apply provider for the new model
+  viewer.setHighlight(null);
+  updateEditInfo();
+  refreshExportLabel();
+}
+
+function updateEditInfo() {
+  if (!current) { editInfo.textContent = ''; return; }
+  const kind = current.kind === 'bambu' ? 'Bambu project' : 'OpenSCAD model';
+  let profile;
+  if (targetSel.value === 'u1') profile = '→ Snapmaker U1 profile';
+  else if (current.kind === 'bambu') profile = '→ no change (⚠ keeps the source printer settings; Snapmaker OrcaSlicer may flag them — pick “Snapmaker U1” to print on a U1)';
+  else profile = '→ no change (colors only; no printer profile added)';
+  let msg = `${kind} ${profile}`;
+  if (current.complexPaintCount) msg += ` · ⚠ ${current.complexPaintCount} finely-painted triangle(s) flattened`;
+  editInfo.textContent = msg;
+}
+
+// Build output bytes for a parsed project, honoring the Target Printer dropdown.
+async function buildBytesFor(parsed, swatches, colorToSlot) {
+  const [u1Base, u1Supports] = await templatesReady;
+  const target = targetSel.value; // 'keep' | 'u1'
+  const projectSettingsTemplate = chooseProjectSettings(parsed, target, { u1Base, u1Supports });
+  const sliceInfoTemplate = (parsed.kind === 'bambu' && target === 'keep') ? parsed.rawSliceInfo : null;
+  return buildProjectBytes({
+    title: parsed.title, verts: parsed.verts, tris: parsed.tris,
+    colorToSlot, swatches, projectSettingsTemplate, sliceInfoTemplate,
+    preserveFiles: parsed.previewFiles, coverRels: parsed.coverRels,
+  });
+}
+
+async function exportCurrent() {
+  const { swatches, colorToSlot } = matrix.getState();
+  const bytes = await buildBytesFor(current, swatches, colorToSlot);
+  download(bytes, outputName(queue[idx].name, currentSuffix()));
+  converted++;
+  return { swatches, colorToSlot };
+}
+
+// Best-effort: reuse the just-edited swatches + mapping for every remaining file.
+async function applyToRemaining(swatches, priorMapping) {
+  for (let i = idx + 1; i < queue.length; i++) {
+    try {
+      const p = await parseAnyProject(new Uint8Array(await queue[i].arrayBuffer()));
+      const colorToSlot = mappingForSwatches(p.paintedColors, swatches, priorMapping);
+      const bytes = await buildBytesFor(p, swatches, colorToSlot);
+      download(bytes, outputName(queue[i].name, currentSuffix()));
+      converted++;
+      await new Promise((r) => setTimeout(r, 300)); // stagger → multi-download prompt
+    } catch (err) {
+      console.error(queue[i].name, err);
+    }
+  }
+}
+
+async function onExport() {
+  exportBtn.disabled = true;
+  try {
+    const { swatches, colorToSlot } = await exportCurrent();
+    if (applyAll.checked) {
+      await applyToRemaining(swatches, colorToSlot);
+      return finish();
+    }
+    if (++idx < queue.length) { await new Promise((r) => setTimeout(r, 300)); return loadCurrent(); }
+    finish();
+  } finally {
+    exportBtn.disabled = false;
+  }
+}
+
+function finish() {
+  editor.hidden = true;
+  drop.hidden = false;
+  result.hidden = false;
+  result.innerHTML = `<div class="summary"><div>Exported ${converted} file(s).</div></div>`;
+  queue = []; idx = 0; current = null;
+  setStatus('');
 }
 
 async function handleFiles(fileList) {
   const files = [...fileList].filter((f) => /\.3mf$/i.test(f.name));
-  const skipped = fileList.length - files.length;
-  if (!files.length) { setStatus('No .3mf files to convert.', 'err'); return; }
-
-  result.hidden = true;
-  result.innerHTML = '';
-  setStatus(`Converting ${files.length} file(s)…`);
-
-  const [settings, sliceInfo] = await templatesReady;
-  const suffix = currentSuffix() || DEFAULT_SUFFIX;
-  const outputs = [];
-  const cards = [];
-
-  for (const file of files) {
-    try {
-      const input = new Uint8Array(await file.arrayBuffer());
-      const { bytes, summary } = await convert3mf(input, settings, sliceInfo);
-      const name = outputName(file.name, suffix);
-      const out = { name, bytes, summary };
-      outputs.push(out);
-      cards.push(fileCard(out));
-    } catch (err) {
-      console.error(file.name, err);
-      cards.push(fileError(file.name, `Conversion failed: ${err.message}`));
-    }
-  }
-
-  await downloadAll(outputs); // auto-trigger within the drop gesture
-
-  const header = document.createElement('div');
-  header.className = 'summary';
-  const parts = [`Converted ${outputs.length}/${files.length} file(s).`];
-  if (skipped) parts.push(`${skipped} non-.3mf file(s) skipped.`);
-  header.innerHTML = `<div>${parts.join(' ')}</div>` +
-    (outputs.length > 1 ? '<button id="all" type="button">Download all again</button>' : '');
-  result.appendChild(header);
-  if (outputs.length > 1) header.querySelector('#all').addEventListener('click', () => downloadAll(outputs));
-  cards.forEach((c) => result.appendChild(c));
-  result.hidden = false;
-  setStatus('');
+  if (!files.length) { setStatus('No .3mf files.', 'err'); return; }
+  queue = files; idx = 0; converted = 0;
+  applyAll.checked = false;
+  await loadCurrent();
 }
 
-// --- drag & drop wiring ---
+// --- wiring ---
 ['dragenter', 'dragover'].forEach((ev) =>
   drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((ev) =>
@@ -123,7 +207,12 @@ drop.addEventListener('click', () => fileInput.click());
 drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
 fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });
 
-// Feature check for the native zip codec.
+modeInput.addEventListener('click', () => setMode('input'));
+modeOutput.addEventListener('click', () => setMode('output'));
+applyAll.addEventListener('change', refreshExportLabel);
+targetSel.addEventListener('change', updateEditInfo);
+exportBtn.addEventListener('click', onExport);
+
 if (typeof DecompressionStream === 'undefined') {
   setStatus('This browser lacks the Compression Streams API. Use a recent Chrome, Edge, Firefox, or Safari.', 'err');
 }

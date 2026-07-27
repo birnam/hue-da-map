@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>test</title></head>
+<body>
+  <div id="matrix"></div>
+  <div class="viewer-wrap" style="width:400px;height:300px"><canvas id="canvas"></canvas></div>
+  <pre id="out">running…</pre>
+
+  <script type="importmap">
+    { "imports": { "three": "/src/vendor/three.module.js" } }
+  </script>
+  <script type="module">
+    import { parseProject, parseAnyProject, detectInputType, defaultSwatches, mappingForSwatches, buildProjectBytes } from '/src/convert.js';
+    import { unzip } from '/src/zip.js';
+    import { MappingMatrix } from '/src/matrix.js';
+    const log = [];
+    const ok = (c, m) => log.push((c ? 'PASS ' : 'FAIL ') + m);
+    (async () => {
+      try {
+        const settings = await (await fetch('/src/templates/project_settings.base.json')).text();
+        const slice = await (await fetch('/src/templates/slice_info.base.xml')).text();
+        const buf = new Uint8Array(await (await fetch('/gridfinity-cup-1x1x3U-label-v1-basematerial.3mf')).arrayBuffer());
+
+        const p = await parseProject(buf);
+        ok(p.tris.length === 3228, `parseProject tris=${p.tris.length}`);
+        ok(p.paintedColors.length === 6, `paintedColors=${p.paintedColors.length}`);
+        ok(p.definedColors.length === 7, `definedColors=${p.definedColors.length}`);
+
+        const sw = defaultSwatches(p.definedColors, p.paintedColors);
+        ok(sw.filter(Boolean).length === 4, `swatches=${JSON.stringify(sw)}`);
+        const map = mappingForSwatches(p.paintedColors, sw);
+        ok(Object.keys(map).length === 6, `mapping keys=${Object.keys(map).length}`);
+
+        const bytes = await buildProjectBytes({ title: p.title, verts: p.verts, tris: p.tris, colorToSlot: map, swatches: sw, projectSettingsTemplate: settings, sliceInfoTemplate: slice });
+        const out = await unzip(bytes);
+        const mesh = new TextDecoder().decode(out['3D/Objects/Object_1.model']);
+        ok(/paint_color="/.test(mesh), 'output has paint_color');
+
+        // Matrix (DOM) + interactions
+        let changes = 0, hl = 'none';
+        const m = new MappingMatrix(document.getElementById('matrix'), {
+          onChange: () => changes++, onHighlight: (h) => { hl = h; },
+        });
+        m.setData({ inputColors: p.paintedColors, swatches: sw, colorToSlot: map });
+        ok(document.querySelectorAll('table.matrix .dot.on').length === 6, 'matrix rendered one dot-on per row');
+
+        // Remap the first input row to slot 2 by clicking its slot-2 dot.
+        const rows = document.querySelectorAll('table.matrix tr');
+        const firstRowDots = rows[1].querySelectorAll('.dot');
+        firstRowDots[1].click(); // slot 2
+        ok(m.getState().colorToSlot[p.paintedColors[0]] === 2, 'dot click remaps to slot 2');
+        ok(changes === 1, `onChange fired (${changes})`);
+
+        // Click the first input swatch → highlight callback.
+        rows[1].querySelector('.swatch.in').click();
+        ok(hl === p.paintedColors[0], 'input swatch triggers highlight');
+
+        // Editing an output swatch updates state + recolors.
+        m.swatches[3] = '#123456'; m.render(); // simulate picker result path
+        ok(m.getState().swatches[3] === '#123456', 'output swatch editable');
+
+        // Bambu input detection + parse (phase 3).
+        const bcube = new Uint8Array(await (await fetch('/colored-cube.3mf')).arrayBuffer());
+        const bp = await parseAnyProject(bcube);
+        ok(bp.kind === 'bambu' && bp.tris.length === 12, `bambu detect+parse (kind=${bp.kind}, tris=${bp.tris.length})`);
+        ok(bp.paintedColors.length === 4, `bambu palette decoded (${bp.paintedColors.length} colors)`);
+
+        // Viewer / WebGL (best-effort — headless GL may be unavailable)
+        try {
+          const { Viewer } = await import('/src/viewer.js');
+          const v = new Viewer(document.getElementById('canvas'));
+          v.setModel(p.verts, p.tris);
+          v.setProvider((t) => t.hex);
+          v.setHighlight(p.paintedColors[0]);
+          ok(v.mesh && v.mesh.geometry.attributes.color.count === 3228 * 3, `viewer colors=${v.mesh.geometry.attributes.color.count}`);
+          // Z-up orbit: the controls' quat must map camera.up (Z) onto world +Y.
+          ok(v.camera.up.z === 1, `camera up is Z (${v.camera.up.x},${v.camera.up.y},${v.camera.up.z})`);
+          const u = v.camera.up.clone().applyQuaternion(v.controls._quat);
+          ok(Math.abs(u.x) < 0.01 && Math.abs(u.y - 1) < 0.01 && Math.abs(u.z) < 0.01,
+             `orbit axis aligned to Z-up (up→[${u.x.toFixed(2)},${u.y.toFixed(2)},${u.z.toFixed(2)}])`);
+        } catch (e) {
+          log.push('WEBGL-SKIP ' + e.message);
+        }
+      } catch (e) {
+        log.push('FAIL exception: ' + e.message + '\n' + e.stack);
+      }
+      const text = log.join('\n');
+      document.getElementById('out').textContent = text;
+      document.body.setAttribute('data-done', '1');
+      console.log('=== RESULT ===\n' + text + '\n=== END ===');
+    })();
+  </script>
+</body>
+</html>

@@ -11,6 +11,7 @@
 //                        e.g.  in.3mf -> in-snorcapaint.3mf  (works with many inputs).
 //
 // Options:
+//   -t, --target <k>     Printer profile: "keep" = no change (default), "u1" = Snapmaker U1.
 //   -s, --suffix <text>  Suffix used when deriving names (default: -snorcapaint).
 //   -q, --quiet          Suppress the per-file summary (always on stderr anyway).
 //   -h, --help           Show this help.
@@ -19,7 +20,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, basename } from 'node:path';
-import { convert3mf, outputName, DEFAULT_SUFFIX, PAINT_CODES } from '../src/convert.js';
+import { convertProject, outputName, DEFAULT_SUFFIX, PAINT_CODES } from '../src/convert.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -39,6 +40,7 @@ Output:
   -o        (bare)   Derive <input><suffix>.3mf (works with multiple inputs).
 
 Options:
+  -t, --target <k>   Printer profile: "keep" = no change (default), "u1" = Snapmaker U1.
   -s, --suffix <t>   Suffix for derived names (default: "${DEFAULT_SUFFIX}").
   -q, --quiet        Suppress the per-file summary.
   -h, --help         Show this help.
@@ -47,14 +49,15 @@ Examples:
   convert in.3mf -o in-U1.3mf      # explicit path
   convert in.3mf -o                # -> in-snorcapaint.3mf
   convert in.3mf                   # -> stdout
-  convert in.3mf > in-U1.3mf       # -> in-U1.3mf (shell redirect)
+  convert bambu.3mf -t u1 -o       # retarget a Bambu file to Snapmaker U1
   convert *.3mf -o -s -u1          # batch, derived names`);
 }
 
 function parseArgs(argv) {
   const inputs = [];
   let output; // undefined = stdout | DERIVE = bare -o | string = explicit path
-  let suffix = DEFAULT_SUFFIX, quiet = false;
+  let suffix = DEFAULT_SUFFIX, quiet = false, target = 'keep';
+  const setTarget = (v) => { if (v !== 'keep' && v !== 'u1') throw new Error(`--target must be "keep" or "u1", got "${v}"`); target = v; };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') return { help: true };
@@ -65,12 +68,14 @@ function parseArgs(argv) {
       else output = DERIVE; // bare -o
     } else if (a.startsWith('--output=')) output = a.slice(9);
     else if (a.startsWith('-o=')) output = a.slice(3);
+    else if (a === '-t' || a === '--target') setTarget(argv[++i]);
+    else if (a.startsWith('--target=')) setTarget(a.slice(9));
     else if (a === '-s' || a === '--suffix') suffix = argv[++i];
     else if (a.startsWith('--suffix=')) suffix = a.slice(9);
     else if (a.startsWith('-') && a !== '-') throw new Error(`Unknown option: ${a}`);
     else inputs.push(a);
   }
-  return { inputs, output, suffix, quiet };
+  return { inputs, output, suffix, quiet, target };
 }
 
 async function main() {
@@ -94,14 +99,14 @@ async function main() {
   }
 
   const info = (msg) => { if (!opts.quiet) console.error(msg); };
-  const settings = readFileSync(join(ROOT, 'src/templates/project_settings.base.json'), 'utf8');
-  const sliceInfo = readFileSync(join(ROOT, 'src/templates/slice_info.base.xml'), 'utf8');
+  const u1Base = readFileSync(join(ROOT, 'src/templates/project_settings.base.json'), 'utf8');
+  const u1Supports = readFileSync(join(ROOT, 'src/templates/project_settings.supports.json'), 'utf8');
 
   let failures = 0;
   for (const input of opts.inputs) {
     try {
       const bytes = new Uint8Array(readFileSync(input));
-      const { bytes: out, summary } = await convert3mf(bytes, settings, sliceInfo);
+      const { bytes: out, summary, kind, complexPaintCount } = await convertProject(bytes, { target: opts.target, u1Base, u1Supports });
 
       let dest;
       if (toStdout) {
@@ -112,11 +117,12 @@ async function main() {
         writeFileSync(dest, out);
       }
 
-      info(`\n${basename(input)} → ${dest}`);
+      info(`\n${basename(input)} → ${dest}  [${kind}, target=${opts.target}]`);
       info(`  ${summary.triangles} triangles · ${summary.inputColors.length} input color(s) → ${summary.numSlots} slot(s)`);
       for (const m of summary.mapping) {
         info(`    ${m.input} → slot ${m.slot} (paint_color=${PAINT_CODES[m.slot] ?? 'none'})`);
       }
+      if (complexPaintCount) info(`  warning: ${complexPaintCount} finely-painted triangle(s) flattened to a solid color`);
     } catch (e) {
       console.error(`error: ${input}: ${e.message}`);
       failures++;

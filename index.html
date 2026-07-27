@@ -9,13 +9,21 @@
 <body>
   <main>
     <h1>3MF&nbsp;→&nbsp;snorca&nbsp;paint</h1>
-    <p class="lede">Drop one or more colored 3MFs (OpenSCAD <code>basematerials</code> / <code>colorgroup</code>)
-      to convert them into Snapmaker&nbsp;OrcaSlicer projects with <code>paint_color</code> regions.
-      Everything runs in your browser — no upload.</p>
+    <p class="lede">Drop colored 3MF file(s) — OpenSCAD (<code>basematerials</code>/<code>colorgroup</code>)
+      or Bambu Studio projects. Map their colors onto the four Snapmaker&nbsp;U1 filament slots,
+      preview in 3D, then export. Everything runs in your browser — no upload.</p>
 
-    <label class="field" for="suffix">Output filename suffix
-      <input id="suffix" type="text" value="-snorcapaint" spellcheck="false" autocomplete="off" />
-    </label>
+    <div class="controls-row">
+      <label class="field" for="suffix">Output filename suffix
+        <input id="suffix" type="text" value="-snorcapaint" spellcheck="false" autocomplete="off" />
+      </label>
+      <label class="field" for="target">Printer profile
+        <select id="target">
+          <option value="keep" selected>No change</option>
+          <option value="u1">Snapmaker U1</option>
+        </select>
+      </label>
+    </div>
 
     <div id="drop" class="dropzone" tabindex="0" role="button" aria-label="Drop .3mf files or click to choose">
       <div class="dz-inner">
@@ -25,9 +33,32 @@
     </div>
     <input id="file" type="file" accept=".3mf" multiple hidden />
 
+    <section id="editor" hidden>
+      <div class="toolbar">
+        <span id="queue" class="queue"></span>
+        <span id="editinfo" class="editinfo"></span>
+        <label class="applyall"><input type="checkbox" id="applyAll" /> Apply to all remaining</label>
+        <button id="export" type="button">Export</button>
+      </div>
+      <div class="editor-body">
+        <div class="viewer-wrap">
+          <canvas id="canvas"></canvas>
+          <div class="overlay">
+            <button id="mode-input" type="button" class="active">Input</button>
+            <button id="mode-output" type="button">Output</button>
+          </div>
+        </div>
+        <div id="matrix" class="matrix-panel"></div>
+      </div>
+    </section>
+
     <p id="status" role="status" aria-live="polite"></p>
     <div id="result" hidden></div>
   </main>
+
+  <script type="importmap">
+    { "imports": { "three": "./src/vendor/three.module.js" } }
+  </script>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

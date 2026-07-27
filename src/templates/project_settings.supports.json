@@ -136,6 +136,14 @@
     "detect_narrow_internal_solid_infill": "1",
     "detect_overhang_wall": "1",
     "detect_thin_wall": "0",
+    "different_settings_to_system": [
+        "enable_support",
+        "",
+        "",
+        "",
+        "",
+        ""
+    ],
     "disable_m73": "0",
     "dont_filter_internal_bridges": "disabled",
     "dont_slow_down_outer_wall": [
@@ -173,7 +181,7 @@
         "1"
     ],
     "enable_prime_tower": "1",
-    "enable_support": "0",
+    "enable_support": "1",
     "enforce_support_layers": "0",
     "eng_plate_temp": [
         "60",
