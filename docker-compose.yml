@@ -7,12 +7,12 @@
 # Portainer will build the image from the Dockerfile in the repo root.
 #
 # If your Portainer cannot build, pre-build and push the image, then replace
-# `build: .` with `image: your-registry/snorcapaint:latest`.
+# `build: .` with `image: your-registry/huedamap:latest`.
 services:
-  snorcapaint:
+  huedamap:
     build: .
-    image: snorcapaint:latest
-    container_name: snorcapaint
+    image: huedamap:latest
+    container_name: huedamap
     ports:
       - "8080:80"
     restart: unless-stopped

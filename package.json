@@ -1,10 +1,10 @@
 {
-  "name": "3mf-color-to-part",
+  "name": "hue-da-map",
   "version": "0.1.0",
-  "description": "Convert colored 3MF files into Snapmaker-OrcaSlicer paint projects",
+  "description": "Hue da Map — fix 3MF colors and map them onto Snapmaker U1 filament slots",
   "type": "module",
   "bin": {
-    "3mf-snorcapaint": "bin/convert.mjs"
+    "huedamap": "bin/convert.mjs"
   },
   "scripts": {
     "convert": "node bin/convert.mjs",

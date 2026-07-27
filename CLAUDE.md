@@ -1,6 +1,7 @@
 # Hue da Map
 
-(repo dir: `3mf-color-to-part`; npm name unchanged.) Output filename suffix defaults to `-HdM`.
+npm package `hue-da-map`; CLI/bin `huedamap`; Docker service/image `huedamap`. Output
+filename suffix defaults to `-HdM`.
 
 Convert colored 3MF files (as exported by OpenSCAD) into **Snapmaker OrcaSlicer
 ("snorca")** projects whose colors show up correctly, mapping an arbitrary
@@ -140,7 +141,7 @@ interactive editor all reuse the exact same logic (no duplication):
 ### CLI
 ```bash
 pnpm convert <input.3mf...> [-o [<output.3mf>]] [-s <suffix>] [-q]
-# equivalently: node bin/convert.mjs ... , or the bin: 3mf-snorcapaint ...
+# equivalently: node bin/convert.mjs ... , or the bin: huedamap ...
 ```
 The output destination depends on `-o`:
 
