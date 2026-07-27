@@ -7,6 +7,7 @@
     "huedamap": "bin/convert.mjs"
   },
   "scripts": {
+    "build": "node scripts/bundle.mjs",
     "convert": "node bin/convert.mjs",
     "test": "node test/sanity.mjs && node test/phase3.mjs",
     "test:browser": "node test/browser-run.mjs && node test/smoke-index.mjs",
@@ -15,5 +16,8 @@
   "engines": {
     "node": ">=18"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
 }

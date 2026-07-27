@@ -15,10 +15,12 @@ export class MappingMatrix {
     this.colorToSlot = {};    // inputHex -> slot (1..MAX_SLOTS)
     this.highlighted = null;
 
-    // Hidden color input reused for editing output swatches.
+    // Hidden color input reused for editing output swatches. It is moved over
+    // the clicked swatch before opening (see _editSwatch) so the browser's
+    // native picker popup anchors there instead of the top-left corner.
     this.picker = document.createElement('input');
     this.picker.type = 'color';
-    this.picker.style.cssText = 'position:fixed;left:-9999px;width:0;height:0;opacity:0';
+    this.picker.style.cssText = 'position:fixed;width:0;height:0;opacity:0;border:0;padding:0;margin:0;pointer-events:none';
     this.picker.addEventListener('input', () => {
       if (this._editing != null) {
         this.swatches[this._editing] = this.picker.value.toUpperCase();
@@ -42,9 +44,18 @@ export class MappingMatrix {
     return { swatches: this.swatches.slice(), colorToSlot: { ...this.colorToSlot } };
   }
 
-  _editSwatch(i) {
+  _editSwatch(i, anchorEl) {
     this._editing = i;
     this.picker.value = this.swatches[i] || '#CCCCCC';
+    // Overlay the invisible input on the clicked swatch so the native popup
+    // opens next to it rather than pinned to the viewport corner.
+    if (anchorEl) {
+      const r = anchorEl.getBoundingClientRect();
+      this.picker.style.left = `${r.left}px`;
+      this.picker.style.top = `${r.top}px`;
+      this.picker.style.width = `${r.width}px`;
+      this.picker.style.height = `${r.height}px`;
+    }
     this.picker.click();
   }
 
@@ -74,7 +85,7 @@ export class MappingMatrix {
       btn.className = 'swatch out' + (hex ? '' : ' empty');
       btn.title = hex ? `Slot ${s + 1}: ${hex} (click to change)` : `Slot ${s + 1}: unused (click to set)`;
       if (hex) btn.style.background = hex; else btn.textContent = 'X';
-      btn.addEventListener('click', () => this._editSwatch(s));
+      btn.addEventListener('click', () => this._editSwatch(s, btn));
       const label = document.createElement('div');
       label.className = 'slotnum';
       label.textContent = `slot ${s + 1}`;

@@ -7,6 +7,7 @@ import {
 } from './convert.js';
 import { Viewer } from './viewer.js';
 import { MappingMatrix } from './matrix.js';
+import { templatesReady } from './templates.js';
 
 const $ = (id) => document.getElementById(id);
 const drop = $('drop');
@@ -25,17 +26,12 @@ const exportBtn = $('export');
 const modeInput = $('mode-input');
 const modeOutput = $('mode-output');
 
-const templatesReady = Promise.all([
-  fetch(new URL('./templates/project_settings.base.json', import.meta.url)).then((r) => r.text()),
-  fetch(new URL('./templates/project_settings.supports.json', import.meta.url)).then((r) => r.text()),
-]);
-
 let viewer = null;
 let matrix = null;
 let queue = [];        // File[]
 let idx = 0;
 let current = null;    // parsed project for queue[idx]
-let mode = 'input';    // 'input' | 'output'
+let mode = 'output';   // 'input' | 'output'
 let converted = 0;
 
 function setStatus(msg, kind = '') { status.className = kind; status.textContent = msg; }

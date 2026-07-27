@@ -1,2 +1,4 @@
 *.3mf
 /assets
+/dist
+/node_modules
