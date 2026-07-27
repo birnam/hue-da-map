@@ -24,7 +24,7 @@ export const MAX_SLOTS = 4;
 
 // Plate center used to position the object on the bed (from the reference export).
 export const BED_CENTER = [135.5, 136];
-export const DEFAULT_SUFFIX = '-snorcapaint';
+export const DEFAULT_SUFFIX = '-HdM';
 
 const NS_CORE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 const NS_BAMBU = 'http://schemas.bambulab.com/package/2021';
@@ -368,7 +368,7 @@ ${tLines}
 function rootXml(title, transform) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="${NS_CORE}" xmlns:BambuStudio="${NS_BAMBU}" xmlns:p="${NS_PROD}" requiredextensions="p">
- <metadata name="Application">3mf-color-to-part (snorcapaint)</metadata>
+ <metadata name="Application">Hue da Map</metadata>
  <metadata name="BambuStudio:3mfVersion">1</metadata>
  <metadata name="Title">${xmlEscape(title)}</metadata>
  <resources>

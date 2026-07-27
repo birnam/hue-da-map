@@ -8,11 +8,11 @@
 //                        e.g.  convert in.3mf > out.3mf
 //   -o <path>            Write to an explicit path (single input only).
 //   -o        (bare)     Derive the name from the input using the suffix,
-//                        e.g.  in.3mf -> in-snorcapaint.3mf  (works with many inputs).
+//                        e.g.  in.3mf -> in-HdM.3mf  (works with many inputs).
 //
 // Options:
 //   -t, --target <k>     Printer profile: "keep" = no change (default), "u1" = Snapmaker U1.
-//   -s, --suffix <text>  Suffix used when deriving names (default: -snorcapaint).
+//   -s, --suffix <text>  Suffix used when deriving names (default: -HdM).
 //   -q, --quiet          Suppress the per-file summary (always on stderr anyway).
 //   -h, --help           Show this help.
 //
@@ -47,7 +47,7 @@ Options:
 
 Examples:
   convert in.3mf -o in-U1.3mf      # explicit path
-  convert in.3mf -o                # -> in-snorcapaint.3mf
+  convert in.3mf -o                # -> in-HdM.3mf
   convert in.3mf                   # -> stdout
   convert bambu.3mf -t u1 -o       # retarget a Bambu file to Snapmaker U1
   convert *.3mf -o -s -u1          # batch, derived names`);

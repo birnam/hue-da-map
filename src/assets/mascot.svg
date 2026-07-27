@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PLACEHOLDER mascot for "Hue da Map": stick figure with sunglasses doing
+     finger guns. Swap this file (or repoint the <img> in index.html) for the
+     real artwork. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 150" width="140" height="150" role="img"
+     aria-label="Stick figure with sunglasses doing finger guns (placeholder)">
+  <g fill="none" stroke="#e6e9ef" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- head -->
+    <circle cx="70" cy="34" r="16"/>
+    <!-- grin -->
+    <path d="M62 43 q8 6 16 0"/>
+    <!-- body -->
+    <line x1="70" y1="50" x2="70" y2="96"/>
+    <!-- legs -->
+    <line x1="70" y1="96" x2="55" y2="128"/>
+    <line x1="70" y1="96" x2="85" y2="128"/>
+    <!-- left arm → finger gun (up-left) -->
+    <path d="M70 62 L48 55 L38 41"/>
+    <path d="M38 41 l-9 -6"/>  <!-- barrel/index -->
+    <path d="M38 41 l5 -7"/>   <!-- thumb -->
+    <!-- right arm → finger gun (up-right) -->
+    <path d="M70 62 L92 55 L102 41"/>
+    <path d="M102 41 l9 -6"/>
+    <path d="M102 41 l-5 -7"/>
+  </g>
+  <!-- sunglasses -->
+  <g fill="#4f8cff" stroke="none">
+    <rect x="53" y="28" width="13" height="8" rx="2.5"/>
+    <rect x="74" y="28" width="13" height="8" rx="2.5"/>
+    <rect x="66" y="30.5" width="8" height="2.5"/>
+  </g>
+</svg>

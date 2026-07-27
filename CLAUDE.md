@@ -1,4 +1,6 @@
-# 3mf-color-to-part
+# Hue da Map
+
+(repo dir: `3mf-color-to-part`; npm name unchanged.) Output filename suffix defaults to `-HdM`.
 
 Convert colored 3MF files (as exported by OpenSCAD) into **Snapmaker OrcaSlicer
 ("snorca")** projects whose colors show up correctly, mapping an arbitrary
@@ -92,7 +94,7 @@ Drop **one or more** `.3mf` files → each converts client-side and
 **auto-downloads** as `<original><suffix>.3mf`, with a per-file mapping summary
 and "Download again" buttons (plus "Download all again" for batches).
 
-- **Editable suffix** — a text field (default `-snorcapaint`) controls the output
+- **Editable suffix** — a text field (default `-HdM`) controls the output
   filename suffix; invalid filename characters are stripped.
 - **Batch conversion** — multiple files can be dropped or selected at once.
   Downloads are fired with a ~300 ms stagger, which is what makes the browser
@@ -114,6 +116,7 @@ src/viewer.js              three.js viewer (flat per-triangle colors, input/outp
 src/matrix.js              the 5-column mapping matrix component
 src/paint.js               Bambu/Orca paint_color decoder (solid-leaf → filament slot)
 src/style.css
+src/assets/mascot.svg      placeholder mascot (swap for real art)
 src/vendor/                vendored three.js ESM (no build step)
   three.module.js, three.core.js, OrbitControls.js
 src/templates/             genuine Snapmaker U1 profiles (from bl2u1's u1_template*.3mf)

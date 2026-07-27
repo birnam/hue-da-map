@@ -22,6 +22,19 @@ main { width: 100%; max-width: 640px; transition: max-width .2s; }
 body:has(#editor:not([hidden])) main { max-width: 1120px; }
 h1 { font-size: 1.6rem; margin: 0 0 .4em; }
 .lede { color: var(--muted); margin: 0 0 1.6em; }
+
+.intro { display: flex; align-items: center; gap: 1.2em; margin-bottom: 1.6em; }
+.intro-text { min-width: 0; }
+.intro h1 { margin: 0 0 .3em; }
+.intro .lede { margin: 0; }
+.mascot { margin: 0; flex: 0 0 auto; text-align: center; }
+.mascot img {
+  display: block; width: 92px; height: auto;
+  border: 1px dashed var(--border); border-radius: 12px;
+  padding: 8px; background: var(--panel);
+}
+.mascot figcaption { font-size: .68rem; color: var(--muted); margin-top: .35em; }
+@media (max-width: 520px) { .intro { flex-direction: column; text-align: center; } }
 code { background: #0c0e12; padding: .05em .35em; border-radius: 4px; font-size: .88em; }
 
 .controls-row { display: flex; gap: 1em; }

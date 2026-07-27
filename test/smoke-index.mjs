@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 const ROOT = process.cwd();
 const PORT = 8098;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
-  '.css': 'text/css', '.xml': 'text/xml', '.3mf': 'application/octet-stream' };
+  '.css': 'text/css', '.xml': 'text/xml', '.svg': 'image/svg+xml', '.3mf': 'application/octet-stream' };
 const server = createServer((req, res) => {
   const p = join(ROOT, decodeURIComponent(req.url.split('?')[0]) === '/' ? '/index.html' : decodeURIComponent(req.url.split('?')[0]));
   if (!existsSync(p) || !p.startsWith(ROOT)) { res.statusCode = 404; return res.end('nf'); }
@@ -47,13 +47,19 @@ async function main() {
 
   const hasControls = await evalExpr(`!!(document.getElementById('target') && document.getElementById('editinfo') && document.querySelector('#target option[value="u1"]'))`);
   const targetDefault = await evalExpr(`document.getElementById('target').value`);
+  const nameOk = await evalExpr(`/Hue da Map/.test((document.querySelector('h1')?.textContent || '').replace(/\\u00a0/g, ' '))`);
+  const suffixDefault = await evalExpr(`document.getElementById('suffix')?.value`);
+  const mascotOk = await evalExpr(`(() => { const i = document.querySelector('.mascot img'); return !!i && i.complete && i.naturalWidth > 0; })()`);
   ws.close(); cleanup();
 
   let ok = true;
   const check = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) ok = false; };
   check(exceptions.length === 0, `no uncaught exceptions on load${exceptions.length ? ': ' + exceptions.join(' | ') : ''}`);
-  check(hasControls === true, 'Target Printer control present (with U1 option)');
-  check(targetDefault === 'keep', `Target defaults to "keep" (got "${targetDefault}")`);
+  check(hasControls === true, 'Printer profile control present (with U1 option)');
+  check(targetDefault === 'keep', `Printer profile defaults to "No change" (got "${targetDefault}")`);
+  check(nameOk === true, 'title reads "Hue da Map"');
+  check(suffixDefault === '-HdM', `suffix defaults to "-HdM" (got "${suffixDefault}")`);
+  check(mascotOk === true, 'mascot placeholder image loads');
   console.log(ok ? '\nPASS ✅\n' : '\nFAIL ❌\n');
   process.exit(ok ? 0 : 1);
 }

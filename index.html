@@ -3,19 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3MF → snorca paint</title>
+  <title>Hue da Map</title>
   <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
   <main>
-    <h1>3MF&nbsp;→&nbsp;snorca&nbsp;paint</h1>
-    <p class="lede">Drop colored 3MF file(s) — OpenSCAD (<code>basematerials</code>/<code>colorgroup</code>)
-      or Bambu Studio projects. Map their colors onto the four Snapmaker&nbsp;U1 filament slots,
-      preview in 3D, then export. Everything runs in your browser — no upload.</p>
+    <header class="intro">
+      <figure class="mascot">
+        <img src="./src/assets/mascot.svg"
+             alt="Hue da Map mascot: stick figure with sunglasses doing finger guns (placeholder)" />
+        <figcaption>mascot placeholder</figcaption>
+      </figure>
+      <div class="intro-text">
+        <h1>Hue&nbsp;da&nbsp;Map</h1>
+        <p class="lede">Fixes 3MF colors so they actually show up. Drop OpenSCAD
+          (<code>basematerials</code>/<code>colorgroup</code>) or Bambu Studio projects, map their
+          colors onto the four Snapmaker&nbsp;U1 filament slots, preview in 3D, then export.
+          Everything runs in your browser — no upload.</p>
+      </div>
+    </header>
 
     <div class="controls-row">
       <label class="field" for="suffix">Output filename suffix
-        <input id="suffix" type="text" value="-snorcapaint" spellcheck="false" autocomplete="off" />
+        <input id="suffix" type="text" value="-HdM" spellcheck="false" autocomplete="off" />
       </label>
       <label class="field" for="target">Printer profile
         <select id="target">
