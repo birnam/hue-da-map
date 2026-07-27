@@ -27,11 +27,9 @@ h1 { font-size: 1.6rem; margin: 0 0 .4em; }
 .intro-text { min-width: 0; }
 .intro h1 { margin: 0 0 .3em; }
 .intro .lede { margin: 0; }
-.mascot { margin: 0; flex: 0 0 auto; text-align: center; }
+.mascot { margin: 0; flex: 0 0 auto; text-align: center; color: var(--text); }
 .mascot img {
-  display: block; width: 92px; height: auto;
-  border: 1px dashed var(--border); border-radius: 12px;
-  padding: 8px; background: var(--panel);
+  display: block; width: 122px; height: auto;
 }
 .mascot figcaption { font-size: .68rem; color: var(--muted); margin-top: .35em; }
 @media (max-width: 520px) { .intro { flex-direction: column; text-align: center; } }
