@@ -26,7 +26,8 @@ h1 { font-size: 1.6rem; margin: 0 0 .4em; }
 .intro { display: flex; align-items: center; gap: 1.2em; margin-bottom: 1.6em; }
 .intro-text { min-width: 0; }
 .intro h1 { margin: 0 0 .3em; }
-.intro .lede { margin: 0; }
+.intro .lede#last-of-type { margin: 0; }
+.intro a { color: white; font-weight: bold; }
 .mascot { margin: 0; flex: 0 0 auto; text-align: center; color: var(--text); }
 .mascot img {
   display: block; width: 122px; height: auto;
