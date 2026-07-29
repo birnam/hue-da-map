@@ -18,7 +18,7 @@ Additionally, I have been using [bl2u1](https://github.com/josuanbn/bl2u1) to cl
 - ❌ interface only lets you choose which filaments to include, which means dropping some! maybe!
 - ❌ no visual aid
 
-You can selfhost **bl2u1** (and I do), so uploading to a server isn't a problem. But there was room for improvement, and I felt my goals differed enough to be a new project entirely. But the **bl2u1** developer certainly deserves a coffee! So [show some appreciation](https://buymeacoffee.com/josuanbn)!
+You can selfhost **bl2u1** (and I do), so uploading to a server isn't a problem if you have the resources. But there was room for improvement, and I felt my goals differed enough to be a new project entirely. But the **bl2u1** developer certainly deserves a coffee! So if you can, please [show some appreciation](https://buymeacoffee.com/josuanbn)!
 
 ## Overview
 
@@ -51,7 +51,7 @@ pnpm build        # → dist/index.html
 
 ### 3. Serve it locally
 
-Any static file server works but if you have python just run:
+Any static file server works but if you have python3 in your path just run:
 
 ```sh
 pnpm serve        # python3 http server on http://localhost:8080
