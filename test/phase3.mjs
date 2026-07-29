@@ -56,8 +56,16 @@ check(ops.printer_model === 'Snapmaker U1', 'openscad+u1 → Snapmaker U1');
 check(ops.filament_colour.length === 4 && ops.nozzle_diameter.length === 4, 'openscad+u1 filament arrays normalized to 4');
 check(ou.summary.numSlots === 4, `openscad+u1 numSlots=${ou.summary.numSlots}`);
 
-// 7. all outputs are valid archives
-for (const [name, bytes] of [['bambu+keep', bk.bytes], ['bambu+u1', bu.bytes], ['openscad+u1', ou.bytes]]) {
+// 7. OpenSCAD + keep → NO project_settings.config at all (no fabricated
+//    "(<filename>)" printer/filament presets in Bambu/Orca), paint still present.
+const okeep = await convertProject(load('gridfinity-cup-1x1x3U-label-v1-color.3mf'), { target: 'keep', u1Base, u1Supports });
+const okOut = await unzip(okeep.bytes);
+check(!okOut['Metadata/project_settings.config'], 'openscad+keep writes no project_settings.config');
+check(!!okOut['Metadata/model_settings.config'] && !!okOut['Metadata/slice_info.config'], 'openscad+keep still a project (model_settings + slice_info)');
+check(/paint_color="/.test(await meshOf(okeep.bytes)), 'openscad+keep output has paint_color');
+
+// 8. all outputs are valid archives
+for (const [name, bytes] of [['bambu+keep', bk.bytes], ['bambu+u1', bu.bytes], ['openscad+u1', ou.bytes], ['openscad+keep', okeep.bytes]]) {
   try { await unzip(bytes); check(true, `${name} produces a valid zip`); }
   catch { check(false, `${name} produces a valid zip`); }
 }
