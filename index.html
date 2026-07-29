@@ -54,10 +54,14 @@
 
     <section id="editor" hidden>
       <div class="toolbar">
-        <span id="queue" class="queue"></span>
-        <span id="editinfo" class="editinfo"></span>
-        <label class="applyall"><input type="checkbox" id="applyAll" /> Apply to all remaining</label>
-        <button id="export" type="button">Export</button>
+        <div class="toolbar-info">
+          <span id="queue" class="queue"></span>
+          <span id="editinfo" class="editinfo"></span>
+        </div>
+        <div class="toolbar-controls">
+          <label class="applyall"><input type="checkbox" id="applyAll" /> Apply to all remaining</label>
+          <button id="export" type="button">Export</button>
+        </div>
       </div>
       <div class="editor-body">
         <div class="viewer-wrap">

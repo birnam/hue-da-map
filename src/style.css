@@ -109,8 +109,22 @@ table.map th { color: var(--muted); font-weight: 600; }
 /* ---------- phase 2: editor ---------- */
 #editor { margin-top: 1.4em; }
 .toolbar {
-  display: flex; align-items: center; gap: 1em; flex-wrap: wrap;
+  display: flex; flex-direction: row;
   margin-bottom: 1em;
+  gap: 24px;
+  width: 100%;
+  justify-content: space-between;
+}
+.toolbar-info {
+  display: flex; flex-direction: row; align-items: center; justify-content: left; gap: 1em; flex-wrap: wrap;
+}
+.toolbar-controls {
+  display: flex; flex-direction: row; align-items: center; justify-content: right; gap: 1em; flex-wrap: wrap;
+  flex-wrap: nowrap;
+  border: solid 1px var(--border);
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 6px 12px;
 }
 .toolbar .queue { color: var(--muted); font-size: .9rem; }
 .toolbar .applyall { color: var(--muted); font-size: .9rem; display: flex; align-items: center; gap: .4em; margin-left: auto; }

@@ -49,7 +49,6 @@ async function main() {
   const targetDefault = await evalExpr(`document.getElementById('target').value`);
   const nameOk = await evalExpr(`/Hue da Map/.test((document.querySelector('h1')?.textContent || '').replace(/\\u00a0/g, ' '))`);
   const suffixDefault = await evalExpr(`document.getElementById('suffix')?.value`);
-  const mascotOk = await evalExpr(`(() => { const i = document.querySelector('.mascot img'); return !!i && i.complete && i.naturalWidth > 0; })()`);
   ws.close(); cleanup();
 
   let ok = true;
@@ -59,7 +58,6 @@ async function main() {
   check(targetDefault === 'keep', `Printer profile defaults to "No change" (got "${targetDefault}")`);
   check(nameOk === true, 'title reads "Hue da Map"');
   check(suffixDefault === '-HdM', `suffix defaults to "-HdM" (got "${suffixDefault}")`);
-  check(mascotOk === true, 'mascot placeholder image loads');
   console.log(ok ? '\nPASS ✅\n' : '\nFAIL ❌\n');
   process.exit(ok ? 0 : 1);
 }

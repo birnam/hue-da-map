@@ -117,7 +117,7 @@ src/viewer.js              three.js viewer (flat per-triangle colors, input/outp
 src/matrix.js              the 5-column mapping matrix component
 src/paint.js               Bambu/Orca paint_color decoder (solid-leaf → filament slot)
 src/style.css
-src/assets/mascot.svg      placeholder mascot (swap for real art)
+src/assets/gunhand.svg     favicon when project is not built to single html
 src/vendor/                vendored three.js ESM (no build step)
   three.module.js, three.core.js, OrbitControls.js
 src/templates/             genuine Snapmaker U1 profiles (from bl2u1's u1_template*.3mf)
@@ -140,24 +140,34 @@ interactive editor all reuse the exact same logic (no duplication):
 
 ### CLI
 ```bash
-pnpm convert <input.3mf...> [-o [<output.3mf>]] [-s <suffix>] [-q]
+pnpm convert <input.3mf...> [<output>] [-o [<output>]] [-s <suffix>] [-q]
 # equivalently: node bin/convert.mjs ... , or the bin: huedamap ...
 ```
-The output destination depends on `-o`:
+The output destination depends on `-o` / a trailing positional (`outputMode()` in
+`bin/convert.mjs`): **files by default, stdout only on request.**
 
 | Invocation | Result |
 |---|---|
-| `convert in.3mf` | stream the 3MF to **stdout** (single input) |
-| `convert in.3mf > out.3mf` | shell redirect → `out.3mf` |
+| `convert in.3mf` | derive into **cwd** → `./in<suffix>.3mf` (works with many inputs) |
+| `convert in.3mf out.3mf` | trailing positional = output → `./out.3mf` |
 | `convert in.3mf -o out.3mf` | write to the explicit path (single input) |
-| `convert in.3mf -o` | derive `in<suffix>.3mf` (bare `-o`; works with many inputs) |
-| `convert *.3mf -o -s -u1` | batch, derive names with a custom suffix |
+| `convert in.3mf -o dist/` | derive into a directory → `dist/in<suffix>.3mf` |
+| `convert in.3mf -o` | bare `-o` → stream to **stdout** (single input) |
+| `convert *.3mf -s -u1` | batch, derive names with a custom suffix |
 
+- A **trailing positional** is taken as the output only when `-o` is absent and it
+  is *not an existing file* — so globs of existing files stay inputs. It behaves
+  exactly like `-o <same value>`.
+- **Directory vs. file**: an existing directory or a trailing `/` means "derive
+  names in here"; anything else is an exact filename. Missing parent directories
+  are created. An explicit filename **overrides `-s`** (noted on stderr if `-s`
+  was passed).
 - **All informational output (summary, warnings, pnpm's own logging) goes to
   stderr**, so `> file` and pipes stay clean binary streams. `-q` silences the
   per-file summary.
-- Stdout mode and explicit `-o <path>` require a single input; bare `-o` is the
-  way to batch. Per-file failures print to stderr and set a non-zero exit code.
+- Stdout (bare `-o`) and an explicit `-o <file>` require a single input; omitting
+  `-o` or giving a directory is the way to batch. Per-file failures print to
+  stderr and set a non-zero exit code.
 - No dependency install needed — `pnpm convert` runs the script directly.
 
 ### Run / develop
@@ -277,10 +287,22 @@ per-triangle `paint_color`), which our rebuild approach avoids.
   `chooseProjectSettings`. A load-info line notes the kind, profile effect, and any
   flattened-paint warning.
 - **`No change`** = do the color fix but **don't inject/modify a printer profile**:
-  - OpenSCAD → a minimal palette-only `project_settings` (`MINIMAL_PROJECT_SETTINGS`, no
-    `printer_model`), so the file stays portable to whatever slicer/printer the user opens
-    it with (Bambu / Orca main / snorca). *(Openability + paint rendering in Bambu/Orca
-    main with a printer-less profile is UNVERIFIED — confirm and adjust if needed.)*
+  - OpenSCAD → **no `Metadata/project_settings.config` at all**
+    (`chooseProjectSettings` returns `null`; `buildProjectBytes` omits the entry). The
+    slicer keeps the presets the user already has selected, and paint slots 1-4 land on
+    their loaded filaments — so **slot colors are the user's filament colors, not our
+    swatches**. Pick `Snapmaker U1` if you want the palette embedded.
+    - **Why not a palette-only profile?** That was the old behavior
+      (`MINIMAL_PROJECT_SETTINGS`: `filament_colour`/`filament_type` only) and it was
+      **wrong**: Bambu/Orca's `PresetBundle::load_config_file_config` fabricates
+      print + filament + printer presets from *defaults* for **any** embedded config,
+      naming them after the project file when `*_settings_id` keys are absent. Result
+      in snorca: a printer profile and 4 filaments all called `(<filename>)`, plus a
+      validation error — *"Relative extruder addressing requires resetting the extruder
+      position at each layer… Add "G92 E0" to layer_gcode"* (default relative-E vs. the
+      empty `layer_gcode` of a from-defaults printer). Adding preset ids or patching
+      `layer_gcode` would only paper over a fabricated printer; the fix is to ship no
+      config. *(Reported 2026-07-29 by the user from a real snorca open.)*
   - Bambu → preserve the source's own `project_settings` verbatim (only `filament_colour`
     overridden). Its printer is unchanged, so opening in the Snapmaker Orca fork may flag
     Bambu-vs-Orca schema differences (e.g. `ensure_vertical_shell_thickness
@@ -295,7 +317,7 @@ per-triangle `paint_color`), which our rebuild approach avoids.
   declared no cover. Target files are carried in `collectPreviewFiles` (incl. cover-rel
   targets). `model_settings` still points its plate thumbnails at `plate_*.png`.
 
-### CLI: `--target keep|u1` (default `keep`).
+### CLI: `--target keep|u1` (default `keep`), plus the `-o` rules in the CLI section above.
 
 ### Known limitations
 - **Sub-triangle (brush) painting** in a Bambu file flattens to the triangle's base color

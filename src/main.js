@@ -118,7 +118,7 @@ function updateEditInfo() {
   let profile;
   if (targetSel.value === 'u1') profile = '→ Snapmaker U1 profile';
   else if (current.kind === 'bambu') profile = '→ no change (⚠ keeps the source printer settings; Snapmaker OrcaSlicer may flag them — pick “Snapmaker U1” to print on a U1)';
-  else profile = '→ no change (colors only; no printer profile added)';
+  else profile = '→ no change (paint only; no printer/filament profile written, so slot colors come from the filaments loaded in your slicer)';
   let msg = `${kind} ${profile}`;
   if (current.complexPaintCount) msg += ` · ⚠ ${current.complexPaintCount} finely-painted triangle(s) flattened`;
   editInfo.textContent = msg;

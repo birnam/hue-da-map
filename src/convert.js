@@ -511,17 +511,23 @@ export async function buildProjectBytes({ title, verts, tris, colorToSlot, swatc
   while (four.length < 4) four.push(null);
   const filament = four.map((c) => c || PAD_COLOR);
 
-  const settings = JSON.parse(projectSettingsTemplate);
-  settings.filament_colour = filament.slice();
-  settings.filament_multi_colors = filament.slice();
-  // Our output uses ≤4 filament slots. Normalize every per-filament array to 4
-  // entries so a reused (Bambu) profile with a different filament count stays
-  // internally consistent (pad by repeating the last entry, or truncate).
-  for (const k of Object.keys(settings)) {
-    if (k.startsWith('filament_') && Array.isArray(settings[k]) && settings[k].length && settings[k].length !== MAX_SLOTS) {
-      const a = settings[k];
-      while (a.length < MAX_SLOTS) a.push(a[a.length - 1]);
-      a.length = MAX_SLOTS;
+  // No template = "don't add a printer profile": omit project_settings.config
+  // entirely (see chooseProjectSettings). Paint slots then land on whatever
+  // filaments the opening slicer has loaded.
+  let settings = null;
+  if (projectSettingsTemplate) {
+    settings = JSON.parse(projectSettingsTemplate);
+    settings.filament_colour = filament.slice();
+    settings.filament_multi_colors = filament.slice();
+    // Our output uses ≤4 filament slots. Normalize every per-filament array to 4
+    // entries so a reused (Bambu) profile with a different filament count stays
+    // internally consistent (pad by repeating the last entry, or truncate).
+    for (const k of Object.keys(settings)) {
+      if (k.startsWith('filament_') && Array.isArray(settings[k]) && settings[k].length && settings[k].length !== MAX_SLOTS) {
+        const a = settings[k];
+        while (a.length < MAX_SLOTS) a.push(a[a.length - 1]);
+        a.length = MAX_SLOTS;
+      }
     }
   }
 
@@ -531,10 +537,12 @@ export async function buildProjectBytes({ title, verts, tris, colorToSlot, swatc
     { name: '3D/3dmodel.model', data: enc.encode(rootXml(title, transform)) },
     { name: '3D/_rels/3dmodel.model.rels', data: enc.encode(MODEL_RELS) },
     { name: '3D/Objects/Object_1.model', data: enc.encode(meshModelXml(verts, tris, colorToSlot)) },
-    { name: 'Metadata/project_settings.config', data: enc.encode(JSON.stringify(settings, null, 4)) },
     { name: 'Metadata/model_settings.config', data: enc.encode(modelSettingsConfig(title, transform, thumbs)) },
     { name: 'Metadata/slice_info.config', data: enc.encode(sliceInfoTemplate || MIN_SLICE_INFO) },
   ];
+  if (settings) {
+    entries.splice(5, 0, { name: 'Metadata/project_settings.config', data: enc.encode(JSON.stringify(settings, null, 4)) });
+  }
   // Preserved thumbnails / auxiliaries (skip any name we already generate).
   const generated = new Set(entries.map((e) => e.name));
   for (const name of preserveNames) if (!generated.has(name)) entries.push({ name, data: preserveFiles[name] });
@@ -572,30 +580,26 @@ export async function convert3mf(inputBytes, projectSettingsTemplate, sliceInfoT
 
 /**
  * Pick the project_settings template string for a given parsed input + target.
- * - openscad (any target): the genuine U1 profile.
+ * - any kind + 'u1': the genuine U1 profile (supports variant if the input had supports).
  * - bambu + 'keep': the input's own profile (preserve its printer).
- * - bambu + 'u1': the U1 profile (supports variant if the input enabled supports).
+ * - openscad + 'keep': null — emit no project_settings.config at all.
  * @param {{kind, rawProjectSettings, hasSupport}} parsed
  * @param {'keep'|'u1'} target
  * @param {{u1Base:string, u1Supports:string}} templates
+ * @returns {string|null} template JSON, or null for "no profile at all"
  */
-// "No change" for OpenSCAD input: carry only the filament palette, so we don't
-// inject a printer profile that wasn't in the source. Lets the color fix land in
-// whatever slicer/printer the user opens it with (Bambu / Orca main / snorca).
-const MINIMAL_PROJECT_SETTINGS = JSON.stringify({
-  from: 'project',
-  version: '2.2.1',
-  filament_colour: ['#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFFFF'],
-  filament_type: ['PLA', 'PLA', 'PLA', 'PLA'],
-}, null, 4);
-
 export function chooseProjectSettings(parsed, target, { u1Base, u1Supports }) {
   if (target === 'u1') {
     return (parsed.kind === 'bambu' && parsed.hasSupport && u1Supports) ? u1Supports : u1Base;
   }
   // target 'keep' = "No change": don't add/modify a printer profile.
   if (parsed.kind === 'bambu' && parsed.rawProjectSettings) return parsed.rawProjectSettings;
-  return MINIMAL_PROJECT_SETTINGS; // OpenSCAD: palette only, no printer forced
+  // OpenSCAD had no profile at all, so emit no project_settings.config. Any config
+  // — even a palette-only one — makes Bambu/Orca fabricate print/filament/printer
+  // presets from *defaults*, named after the project file (the "(<filename>)"
+  // presets), which then fail validation (e.g. relative-E vs. empty layer_gcode).
+  // Without the file, the slicer keeps the presets the user already has selected.
+  return null;
 }
 
 /**
