@@ -11,15 +11,6 @@ Hue da Map is a tool to clean up files from OpenSCAD, MakerWorld, and other tool
 
 This project was created to fix colored output from OpenSCAD 3mf exports. I was generating [Gridfinity](https://www.youtube.com/watch?v=ra_9zU-mnl8) boxes with [gridfinity_extended_openscad](https://github.com/ostat/gridfinity_extended_openscad). The OpenSCAD document had color. The 3mf export did not. It turns out color painting works a little differently in slicers than in the actual 3mf spec. Huh? (Phineas as narrator: I know what we're going to do today!)
 
-Additionally, I have been using [bl2u1](https://github.com/josuanbn/bl2u1) to clean up most of the files I download from MakerWorld. Except...
-
-- ❌ it doesn't work on multiple files
-- ❌ it uploads files to a server (automatically deleted after 8 hours)
-- ❌ interface only lets you choose which filaments to include, which means dropping some! maybe!
-- ❌ no visual aid
-
-You can selfhost **bl2u1** (and I do), so uploading to a server isn't a problem if you have the resources. But there was room for improvement, and I felt my goals differed enough to be a new project entirely. But the **bl2u1** developer certainly deserves a coffee! So if you can, please [show some appreciation](https://buymeacoffee.com/josuanbn)!
-
 ## Overview
 
 Fixes 3MF colors so they actually show up, and maps them onto the four **Snapmaker U1** filament slots. Drop an OpenSCAD (`basematerials`/`colorgroup`) or Bambu Studio project, remap its colors to slots, preview in 3D, and export a ready-to-slice `.3mf`.
@@ -29,6 +20,25 @@ Models often use **more than four colors**, but the U1 has only four filament sl
 ## 🔒 100% in your browser — nothing is uploaded
 
 Your models **never leave your machine.** Every step — reading the `.3mf`, the 3D preview, color remapping, and writing the new file — runs entirely in your browser with client-side JavaScript. There is no backend, no API, no telemetry. Even when you host it (Docker/static server), the server only sends the page to you; it never receives your files. You can confirm this by running it fully offline.
+
+## Support
+
+If you find this useful, you can show support at [BuyMeACoffee](https://buymeacoffee.com/birnam)!
+
+## Inspiration
+
+I have been using [bl2u1](https://github.com/josuanbn/bl2u1) to clean up most of the files I download from MakerWorld. Except...
+
+- ❌ it doesn't work on multiple files
+- ❌ it uploads files to a server (automatically deleted after 8 hours)
+- ❌ interface only lets you choose which filaments to include, which means dropping some! maybe!
+- ❌ no visual aid
+
+You can selfhost **bl2u1** (and I do), so uploading to a server isn't a problem if you have the resources. But there was room for improvement, and I felt my goals differed enough to be a new project entirely. But the **bl2u1** developer certainly deserves a coffee! So if you can, please [show some appreciation](https://buymeacoffee.com/josuanbn)!
+
+## Was this vibe coded?
+
+Well sure. I'm a software engineer, so I know when and how to use tools effectively. AI is great at coding, and it helps me go from idea to release quickly.
 
 ## Run it
 

@@ -1,6 +1,6 @@
 {
   "name": "hue-da-map",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hue da Map — fix 3MF colors and map them onto Snapmaker U1 filament slots",
   "type": "module",
   "bin": {
