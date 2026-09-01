@@ -128,7 +128,7 @@ table.map th { color: var(--muted); font-weight: 600; }
   padding: 6px 12px;
 }
 .toolbar .queue { color: var(--muted); font-size: .9rem; }
-.toolbar .applyall { color: var(--muted); font-size: .9rem; display: flex; align-items: center; gap: .4em; margin-left: auto; }
+.toolbar .applyall { color: var(--muted); font-size: .9rem; display: flex; align-items: center; gap: .4em; margin-left: auto; white-space: nowrap; }
 .toolbar #export { margin-left: 0; }
 
 .editor-body { display: flex; gap: 1.2em; align-items: stretch; }

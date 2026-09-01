@@ -15,7 +15,11 @@ const u1Supports = readFileSync(join(root, 'src/templates/project_settings.suppo
 let ok = true;
 const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) ok = false; };
 const psOf = async (bytes) => JSON.parse(new TextDecoder().decode((await unzip(bytes))['Metadata/project_settings.config']));
-const meshOf = async (bytes) => new TextDecoder().decode((await unzip(bytes))['3D/Objects/Object_1.model']);
+const meshOf = async (bytes) => {
+  const files = await unzip(bytes);
+  const name = Object.keys(files).find((n) => /^3D\/Objects\/.*\.model$/.test(n));
+  return new TextDecoder().decode(files[name]);
+};
 
 // 1. detection
 check(detectInputType(await unzip(load('colored-cube.3mf'))) === 'bambu', 'detect colored-cube → bambu');

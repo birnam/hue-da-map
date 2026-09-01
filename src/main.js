@@ -2,8 +2,8 @@
 // matrix → Export. Multiple files are edited one at a time (a queue); an
 // "Apply to all" checkbox best-effort applies the current settings to the rest.
 import {
-  parseAnyProject, defaultSwatches, mappingForSwatches, buildProjectBytes,
-  chooseProjectSettings, outputName, DEFAULT_SUFFIX,
+  parseAnyProject, defaultSwatches, mappingForSwatches, buildOutputBytes,
+  outputName, DEFAULT_SUFFIX,
 } from './convert.js';
 import { Viewer } from './viewer.js';
 import { MappingMatrix } from './matrix.js';
@@ -127,14 +127,7 @@ function updateEditInfo() {
 // Build output bytes for a parsed project, honoring the Target Printer dropdown.
 async function buildBytesFor(parsed, swatches, colorToSlot) {
   const [u1Base, u1Supports] = await templatesReady;
-  const target = targetSel.value; // 'keep' | 'u1'
-  const projectSettingsTemplate = chooseProjectSettings(parsed, target, { u1Base, u1Supports });
-  const sliceInfoTemplate = (parsed.kind === 'bambu' && target === 'keep') ? parsed.rawSliceInfo : null;
-  return buildProjectBytes({
-    title: parsed.title, verts: parsed.verts, tris: parsed.tris,
-    colorToSlot, swatches, projectSettingsTemplate, sliceInfoTemplate,
-    preserveFiles: parsed.previewFiles, coverRels: parsed.coverRels,
-  });
+  return buildOutputBytes(parsed, { colorToSlot, swatches, target: targetSel.value, u1Base, u1Supports });
 }
 
 async function exportCurrent() {

@@ -320,27 +320,136 @@ per-triangle `paint_color`), which our rebuild approach avoids.
 ### CLI: `--target keep|u1` (default `keep`), plus the `-o` rules in the CLI section above.
 
 ### Known limitations
-- **Sub-triangle (brush) painting** in a Bambu file flattens to the triangle's base color
-  with a warning (`complexPaintCount`) — we decode only **solid-leaf** `paint_color` codes
-  (slots 1-4: `none/8/0C/1C`). Codes for slots >4 and subdivided bitstreams are not yet
-  reverse-engineered; completing them needs reference files (a brush-painted,
-  boundary-subdividing model; a >4-filament model) and a full encoder.
-- Part-based color beyond simple `part id → extruder` (multi-object) is best-effort.
-- `keep` rebuilds via one merged object, so multi-object/multi-part structure and
-  non-color `model_settings` are not preserved (consistent with our merge scope).
+- **Sub-triangle (brush) painting** in a Bambu file leaves the triangle's `paint_color`
+  untouched (rather than remapping it) with a warning (`complexPaintCount`) — we decode
+  only **solid-leaf** `paint_color` codes (slots 1-4: `none/8/0C/1C`). Codes for slots >4
+  and subdivided bitstreams are not yet reverse-engineered; completing them needs
+  reference files (a brush-painted, boundary-subdividing model; a >4-filament model) and
+  a full encoder.
 
 ### Tests
-- `pnpm test` = `test/sanity.mjs` (+ genuine U1 profile) **and** `test/phase3.mjs`
-  (detection, paint decode, input×target matrix). `pnpm test:browser` adds Bambu
-  detect/parse in headless chromium. **Not human-verified:** opening Bambu→U1 /
-  Bambu→keep / OpenSCAD→U1 outputs in snorca.
+- `pnpm test` = `test/sanity.mjs` (+ genuine U1 profile), `test/phase3.mjs` (detection,
+  paint decode, input×target matrix), **and** `test/phase4.mjs` (multi-plate structure
+  preservation — see Phase 4). `pnpm test:browser` adds Bambu detect/parse in headless
+  chromium. **Not human-verified:** opening Bambu→U1 / Bambu→keep / OpenSCAD→U1 outputs
+  in snorca.
+
+---
+
+## Phase 4 — DONE (multi-plate / multi-object structure preservation)
+
+Fixed a bug where a Bambu Studio export with **multiple plates and an assembled view**
+converted into a single flattened/merged object, losing every plate's layout,
+orientation, and per-object base filament — because the phase-3 pipeline parsed a Bambu
+project down to a flat triangle soup and always rebuilt one hardcoded object/part/plate.
+
+### What a real multi-plate Bambu 3MF actually looks like
+(reverse-engineered from a real Bambu Studio export, kept locally as `sample-multi-plate.3mf`
+— **gitignored, never committed**, for copyright/licensing reasons; see "Reference
+fixtures" below)
+- `3D/3dmodel.model`'s `<resources>` has one **top-level "assembly" `<object>`
+  per plate item**, each wrapping one or more mesh-bearing parts via
+  `<components><component p:path="…" objectid="Y".../></components>` (geometry is
+  de-duplicated: several assembly objects can point at the same component file/objectid,
+  e.g. 4 instances of one clip).
+- `<build><item objectid="X" transform="…"/></build>` places every plate's items in one
+  shared coordinate space (Bambu Studio offsets each plate into its own zone rather than
+  storing plates as separate files).
+- `Metadata/model_settings.config` has one `<object id="X">` per assembly object
+  (mirroring the root model's ids), each with a base `<metadata key="extruder"
+  value="N"/>` (the whole object's default filament slot; `N="0"` = unset/implicit),
+  containing one or more `<part id="Y">` (Y = the mesh object's own id inside its
+  component file) with an optional **part-level** `extruder` override. A `<plate>` per
+  plate groups `<model_instance>` entries (`object_id`+`instance_id`) to say which items
+  belong to that plate; a single project-wide `<assemble>` block lists `<assemble_item>`
+  transforms for Bambu Studio's "assembled view".
+- Per-triangle `paint_color` (decoded per Phase 1) only appears for **brush-painted
+  regions**; everywhere else, color comes from the part/object `extruder` metadata above.
+  Object id and part id are **different id spaces** — resolving a mesh part's base color
+  requires walking component→object, not just matching ids directly.
+
+### Our fix (`src/convert.js`)
+- **Stopped rebuilding from scratch for Bambu input.** Rather than flattening every
+  object into a merged triangle soup and reconstructing a single-object/single-plate
+  project, `buildBambuPreservingBytes()` takes the parsed project's original unzipped
+  files (`parseAnyProject`'s `rawFiles`) and rewrites **only the color-bearing bits in
+  place**:
+  1. per-triangle `paint_color` in every model part (root + every `p:path` component),
+     decoded → old slot → remapped → re-encoded (or dropped, for slot 1);
+  2. every `<metadata key="extruder" value="N"/>` in `model_settings.config` (object- and
+     part-level alike — a single regex pass, since the remap table is a plain
+     old-slot→new-slot lookup independent of which element it's attached to);
+  3. `project_settings.config`'s filament palette (same `keep`/`u1` template selection as
+     Phase 3, via the new shared `applySwatchesToSettings()`/`buildOutputBytes()`).
+
+  Every other file — plates, per-object/instance transforms, the `<assemble>` block,
+  support settings, thumbnails, `cut_information.xml`, `[Content_Types].xml`, `_rels/*`
+  — passes through **byte-identical**, because it's never touched, *except* the one
+  compensating step below. `test/phase4.mjs` asserts the `keep` case is byte-identical,
+  and that `u1` matches Orca's own repositioning (see below) within 0.01mm.
+- **Per-plate bed recentering** (`recenterPlatesForBed()`), reverse-engineered by diffing
+  a real Bambu Studio export against **the same file after manually switching its
+  printer profile to Snapmaker U1 inside Orca Slicer** (`sample-multi-plate.3mf` vs.
+  `sample-multi-plate-U1.3mf`, both gitignored local-only fixtures — see "Reference
+  fixtures"). Orca does **not** apply one global shift for a bed-size change (e.g. Bambu
+  P1S `printable_area` `0,0`→`256,256` vs. the genuine U1 profile's `0.5,1`→`270.5,271`).
+  Instead, comparing all 7 items across the 4 plates showed each **plate's whole group**
+  gets recentered:
+  - the group's *current* centroid (mean of its items' XY translations) is computed,
+  - and replaced by a **zone origin** in an approximately-square grid of plates: zone
+    pitch = **1.2× the bed span**, zone = `bed_center + (col, -row) × pitch`, `row`/`col`
+    from the plate's index (ordered by `plater_id`) into a `ceil(sqrt(numPlates))`-column
+    grid.
+  This reproduced Orca's own output for all 7 items to within floating-point noise
+  (verified directly, not just self-consistently). `bedRectFromSettings()` reads each
+  side's bed center+span from its `printable_area`; `parsePlateGroups()` reads plate→
+  object-id membership from `model_settings.config`; `shiftBuildItemsXY()` applies the
+  resulting per-object delta to just the XY translation of each `<item transform="...">`
+  in the root model — rotation, Z, and the `<assemble>` view (a part-fit-together view,
+  unrelated to bed placement) are untouched. A no-op when source and target beds are
+  identical (e.g. `target: 'keep'`, where the target profile = source profile).
+  **Caveat:** the grid math is verified exactly against one 4-plate reference; the
+  `ceil(sqrt(numPlates))`-column generalization to other plate counts is best-effort and
+  unverified beyond that.
+- **Fixed a latent color-resolution bug** found while building this: the old
+  `parsePartExtruders()` looked up an object's base filament by `<part id>` keyed off the
+  **object's own id** — but object ids and part ids are different id spaces (confirmed
+  above), so non-painted parts already silently mis-resolved to slot 1 pre-Phase-4. Fixed
+  via `parseComponentGraph()` (walks `<component objectid>` to link a mesh part to its
+  enclosing assembly object) + `parseExtruderMetadata()` (reads both levels), shared by
+  the read path (`buildBambu`, for accurate `paintedColors`/matrix rows) and the
+  write path above.
+- OpenSCAD input is unaffected — it's always a single flat mesh with no plate concept,
+  so it still goes through the from-scratch `buildProjectBytes()` rebuild.
+- **Not yet touched: the 3D viewer.** The preview still shows the old flattened/merged
+  geometry (positions may not reflect per-plate layout) — the *exported file* is now
+  structurally faithful; making the on-page preview match is a follow-up.
+
+### Reference fixtures
+All `.3mf` files (including `sample-multi-plate.3mf` and `sample-multi-plate-U1.3mf`,
+the latter being the former after manually switching its printer profile to Snapmaker
+U1 *inside Orca Slicer* — our ground truth for the bed-recentering math above) are
+**gitignored** and never committed — several are real-world downloads, and even the
+synthetic ones could be mistaken for redistributed copyrighted content. Tests that need
+them (`sanity.mjs`, `phase3.mjs`, `phase4.mjs`) assume they exist locally and don't skip
+gracefully if missing; there's no CI. Anyone continuing this work needs their own local
+copies.
+
+### Tests
+- `test/phase4.mjs` (needs local `sample-multi-plate.3mf` + `sample-multi-plate-U1.3mf`):
+  detection, corrected multi-color resolution, plate/assemble/build-item/thumbnail/
+  auxiliary counts and a 4-length filament palette for both `keep`/`u1` targets, `keep`
+  being byte-identical to the source, `u1`'s item placement matching Orca's own U1-switch
+  output (the `-U1.3mf` fixture) within 0.01mm with rotation/Z unchanged, and only
+  known/re-encodable `paint_color` codes in the rewritten mesh parts.
 
 ---
 
 ## Not doing yet
-- Multi-plate / multi-object plate layouts (just render/merge objects).
-- Preserving Bambu sub-triangle painting (needs the full paint bitstream codec +
+- Preserving Bambu sub-triangle (brush) painting (needs the full paint bitstream codec +
   reference files) and slots >4.
 - "Painted regions → separate parts" export.
 - Baking object/component transforms (input assumed identity).
 - Per-file mapping memory across the queue beyond the "apply to all" carry-over.
+- Multi-plate-aware 3D viewer preview (Phase 4 fixed the *exported file*; the on-page
+  preview still shows a flattened merge — see Phase 4).
