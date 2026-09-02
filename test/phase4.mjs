@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { convertProject, parseAnyProject, detectInputType } from '../src/convert.js';
+import { convertProject, parseAnyProject, detectInputType, composeTransform, applyTransform, IDENTITY_TRANSFORM } from '../src/convert.js';
 import { unzip } from '../src/zip.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -109,6 +109,32 @@ for (const target of ['keep', 'u1']) {
   }
   check(!badCode, `${label}: all output paint_color codes are known/re-encodable`);
 }
+
+// The `view` data driving the 3D preview's Assembly / Plate / Object controls
+// (src/main.js, src/viewer.js) — not exercised by anything above, since export
+// goes through the raw-bytes path and never touches `view`.
+check(p.view.objects.length === 7, `view: 7 distinct top-level objects (${p.view.objects.length})`);
+check(p.view.parts.length === 8, `view: 8 mesh parts across those objects (${p.view.parts.length}, object 5 has 2 components)`);
+check(p.view.plates.length === plateCount, `view: ${plateCount} plates`);
+check(p.view.hasAssembly === true, 'view: hasAssembly (source has an <assemble> block)');
+
+// Object 8 (a clip) is instanced as 4 separate top-level objects (9,10,11,12)
+// sharing one mesh resource — the old part-id-keyed lookup collapsed these to
+// one renderable part; each must now list once and still render once each.
+const dupIds = ['9', '10', '11', '12'];
+check(dupIds.every((id) => p.view.objects.filter((o) => o.id === id).length === 1), 'view: duplicated-mesh objects (9,10,11,12) each listed exactly once');
+check(dupIds.every((id) => p.view.parts.some((part) => part.objId === id)), 'view: each duplicated object still has its own renderable part');
+
+// Assembly and Plate views must place the same object differently (they use
+// different transform sources), and Object/All views ignore both (identity).
+const part9 = p.view.parts.find((part) => part.objId === '9');
+const v0 = part9.verts[0];
+const plateWorld = applyTransform(v0, composeTransform(part9.localTransform, p.view.buildTransform['9'] || IDENTITY_TRANSFORM));
+const assemblyWorld = applyTransform(v0, composeTransform(part9.localTransform, p.view.assembleTransform['9'] || IDENTITY_TRANSFORM));
+const objectWorld = applyTransform(v0, composeTransform(part9.localTransform, IDENTITY_TRANSFORM));
+const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+check(dist3(plateWorld, assemblyWorld) > 1, 'view: plate vs. assembly placement differ for object 9');
+check(dist3(objectWorld, v0) < 1e-9, 'view: object/all placement is the part\'s own local geometry (identity)');
 
 console.log(ok ? '\nPASS ✅\n' : '\nFAIL ❌\n');
 process.exit(ok ? 0 : 1);

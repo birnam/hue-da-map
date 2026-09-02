@@ -68,6 +68,19 @@
             <button id="mode-input" type="button">Input</button>
             <button id="mode-output" type="button" class="active">Output</button>
           </div>
+          <div class="overlay overlay-right" id="view-controls">
+            <button id="view-assembly" class="iconbtn" type="button" title="Assembly view" hidden>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7">
+                <rect x="3" y="3" width="12" height="12" rx="2" />
+                <rect x="9" y="9" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+            <div class="plate-dd" id="plate-dd" hidden>
+              <button class="plate-dd-btn" id="plate-dd-btn" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+              <ul class="plate-dd-list" id="plate-dd-list" role="listbox" hidden></ul>
+            </div>
+            <select id="view-object" class="objsel" hidden aria-label="Object"></select>
+          </div>
         </div>
         <div id="matrix" class="matrix-panel"></div>
       </div>

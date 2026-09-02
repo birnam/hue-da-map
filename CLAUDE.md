@@ -445,11 +445,121 @@ copies.
 
 ---
 
+## Phase 5 — DONE (multi-plate-aware 3D preview: Assembly / Plate / Object views)
+
+Phase 4 fixed the *exported file's* structure; the on-page 3D preview still showed a
+single flattened merge with no plate layout. This phase adds an Assembly-view button, a
+Plates dropdown, and an Objects dropdown to the viewer, each showing the project
+positioned the way that view actually implies — preview-only, doesn't touch export.
+
+### The `view` data model (`src/convert.js`)
+`parseAnyProject()` now also returns a `view` field (both `buildOpenscad`/`buildBambu`),
+independent of the flat `verts`/`tris` used for color analysis (which are unchanged):
+```
+view: {
+  parts: [{ objId, localTransform, verts, tris: [{v1,v2,v3,hex}] }],  // one per mesh/component
+  objects: [{ id, name }],       // one per top-level object, first-seen order
+  plates: [{ id, name, objectIds }],
+  hasAssembly: boolean,
+  buildTransform: { [objId]: transform12 },     // <build><item> world placement
+  assembleTransform: { [objId]: transform12 },  // <assemble><assemble_item> world placement
+}
+```
+- **Transform math** (`IDENTITY_TRANSFORM`, `parseTransform`, `composeTransform`,
+  `applyTransform`, exported from `convert.js` and reused by `viewer.js`): a 3MF transform
+  string is 12 numbers, row-major — 3 linear rows + 1 translation row; `composeTransform(a,
+  b)` gives the matrix for "apply `a` then `b`".
+- **OpenSCAD** input has no components/plates/assemble concept: each top-level `<object>`
+  is its own `view.parts` entry at `IDENTITY_TRANSFORM`, `view.objects` names them
+  `Object 1`, `Object 2`, …, and `plates`/`hasAssembly` are empty/false.
+- **Bambu** input: `view.parts` walks each top-level "assembly" `<object>`'s own
+  `<components>` (or, for a simple single-object file with no component indirection like
+  `colored-cube.3mf`, treats the mesh-bearing object itself as standalone) — see the fixed
+  bug below. `view.objects`/`plates`/transforms come from `Metadata/model_settings.config`
+  (`<object name>` metadata, `<plate>`/`plater_name`, `<assemble_item>`) and the root
+  model's `<build><item>`, reusing `parsePlateGroups`/`parseBuildItems` from Phase 4.
+  `cleanPlateName()` blanks a plate name that's literally `"untitled"` (case-insensitive)
+  so the UI shows just the plate's numbered icon with no redundant label.
+
+**Fixed a second latent id-collision bug found while building this:** Bambu Studio's
+"duplicate object" operation makes N top-level `<object>`s share one underlying mesh
+*resource* (same component `objectid`/`p:path`) rather than copying geometry — confirmed
+in `sample-multi-plate.3mf`, where objects 9/10/11/12 (4 clip instances on one plate) all
+reference the same `object_20.model`/part id 8. The old `parseComponentGraph()` /
+`parseExtruderMetadata()` returned a single part-id→object-id / part-id→extruder lookup,
+so whichever of the 4 enclosing objects was scanned *last* silently won and the other 3
+never got a triangle emitted at all — **the in-memory preview (and thus `paintedColors`)
+was missing 3 of the 4 clips**, even before this phase's UI existed. (Export was never
+affected — `buildBambuPreservingBytes` rewrites the raw XML bytes directly and never goes
+through this per-object resolution.) Fixed by reworking both parsers to be keyed by
+*enclosing top-level object*, not by mesh/part id alone: `parseComponentGraph()` now
+returns `componentsByObject` (object id → its own `[{partId, localTransform}]` list, not
+a collapsed reverse map), and `parseExtruderMetadata()` returns `partExtruderByObject`
+(object id → that object's own part-id→slot overrides). `buildBambu()` enumerates
+top-level objects first (from `componentsByObject`'s keys, plus any standalone
+mesh-bearing object never referenced as someone else's component) and emits one
+`view.parts` entry — with correctly *independently* resolved colors — per (object,
+component) pair, so all 4 duplicated instances render. `test/phase4.mjs` asserts this
+directly (`view: duplicated-mesh objects (9,10,11,12) each listed exactly once` /
+`... still has its own renderable part`).
+
+### Viewer (`src/viewer.js`)
+`setModel(verts, tris)` → `setProject(view, mode)` / `setViewMode(mode)`, where `mode` is
+`{type:'assembly'}` / `{type:'plate', id}` / `{type:'object', id}` / `{type:'all'}`.
+`_partsForMode()` picks which `view.parts` are visible and which transform source to use
+(`buildTransform`/`assembleTransform`/identity); `_rebuild()` composes each visible part's
+own `localTransform` with that world transform, applies it to the part's local vertices,
+and rebuilds the flat non-indexed geometry exactly as the old `setModel` did — recoloring
+(`setProvider`/`setHighlight`/`updateColors`) is unchanged, since it only ever looked at
+`this.tris`.
+
+### UI (`index.html`, `src/style.css`, `src/main.js`)
+A second overlay (`.overlay-right`) in the top-right corner of the viewer, opposite the
+Input/Output toggle: an Assembly icon button, a **custom** Plates dropdown (a button that
+opens a popover list; native `<select>` can't render an icon + bold number badge per
+option), and a plain `<select>` for Objects. Each control is `hidden` (not disabled) when
+irrelevant, per spec:
+- Assembly button hidden unless `view.hasAssembly`.
+- Plates dropdown hidden unless `view.plates.length`.
+- Objects `<select>` (with an `All` option) hidden unless `view.objects.length > 1` — a
+  single object needs neither the dropdown nor an `All` option.
+Default view precedence on load (`defaultModeFor` in `main.js`): Assembly if present, else
+the first plate, else Object "All". `setupViewControls()` rebuilds the controls'
+visibility/contents per queue file (structure varies file to file) *without* touching the
+viewer; `applyViewMode()` is the shared handler for both that initial pick and later user
+clicks, calling `viewer.setViewMode()` + updating button/select active state. Plate names
+and object names come straight from the 3MF file, so they're escaped (`escapeHtml`) before
+being written into dropdown `innerHTML`.
+
+### Tests
+- `test/phase4.mjs` gained `view`-model assertions (object/part/plate counts, `hasAssembly`,
+  the duplicated-object fix above, and that Assembly vs. Plate placement genuinely differ
+  while Object/All uses identity) — pure data-model checks, no browser needed.
+- `test/browser-multiplate.mjs` (new, needs the same local fixtures as `test/phase4.mjs`
+  plus `gridfinity-cup-1x1x3U-label-v1-color.3mf`): drives the **real** `index.html` app
+  (not a self-test harness) over the DevTools Protocol — picks a file into the hidden
+  `<input>` via `DOM.setFileInputFiles` (not a synthetic drag-drop `DragEvent`, which is
+  known-flaky under headless automation), then asserts the controls' visibility/default
+  view for a multi-plate Bambu file, that clicking through Plate → Object views updates
+  the active button/select and doesn't throw, and that a single-object OpenSCAD file hides
+  all three controls. **Gotcha that cost real debugging time:** `#file` exists in the
+  static HTML the instant the document parses, ~100ms before the `type="module" src="./
+  src/main.js"` script has finished loading and attached its `change` listener — dispatching
+  into that window silently drops the event (no listener yet, and DOM events aren't queued
+  for listeners added later), causing the exact intermittent hang this describes. Fixed by
+  polling `DOMDebugger.getEventListeners` on the resolved `#file` node until a `change`
+  listener is actually present before touching the input, instead of just checking that the
+  element exists. Wired into `pnpm test:browser`.
+
+---
+
 ## Not doing yet
 - Preserving Bambu sub-triangle (brush) painting (needs the full paint bitstream codec +
   reference files) and slots >4.
 - "Painted regions → separate parts" export.
 - Baking object/component transforms (input assumed identity).
 - Per-file mapping memory across the queue beyond the "apply to all" carry-over.
-- Multi-plate-aware 3D viewer preview (Phase 4 fixed the *exported file*; the on-page
-  preview still shows a flattened merge — see Phase 4).
+- The preview's Object dropdown lists one entry per *top-level object*, matching Bambu
+  Studio's own "duplicate object" semantics (see Phase 5) — it does not further expose
+  multiple `<build>` instances of the same object id as separate rows (rare in practice,
+  since Bambu Studio's own duplicate/array tools create separate object ids instead).

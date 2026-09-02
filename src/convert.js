@@ -59,6 +59,34 @@ function uuid() {
     : '00000000-0000-4000-8000-000000000000';
 }
 
+// --- transform math, for the 3D preview's Assembly / Plate / Object views --
+// A 3MF transform string is 12 numbers, row-major: 3 linear rows (indices
+// 0-8) then 1 translation row (indices 9-11). Point transform: p' = p·L + T.
+export const IDENTITY_TRANSFORM = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+
+export function parseTransform(str) {
+  const n = (str || '').trim().split(/\s+/).map(Number);
+  return (n.length === 12 && n.every(Number.isFinite)) ? n : IDENTITY_TRANSFORM;
+}
+
+// Combine two transforms so that applying the result equals applying `a` then `b`.
+export function composeTransform(a, b) {
+  const la = a.slice(0, 9), ta = a.slice(9, 12);
+  const lb = b.slice(0, 9), tb = b.slice(9, 12);
+  const l = [];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let s = 0;
+    for (let k = 0; k < 3; k++) s += la[i * 3 + k] * lb[k * 3 + j];
+    l.push(s);
+  }
+  const t = [0, 1, 2].map((j) => ta[0] * lb[j] + ta[1] * lb[3 + j] + ta[2] * lb[6 + j] + tb[j]);
+  return [...l, ...t];
+}
+
+export function applyTransform(p, m) {
+  return [0, 1, 2].map((j) => p[0] * m[j] + p[1] * m[3 + j] + p[2] * m[6 + j] + m[9 + j]);
+}
+
 // --- 3MF model parsing (regex based; 3MF model XML is machine-regular) ------
 export function parseModelXml(xml) {
   const groups = {};        // resourceId -> [hex, ...]
@@ -148,27 +176,37 @@ function collectGeometry(files) {
   return { groups, objects, title, baseMaterials, modelParts, textByName };
 }
 
-// Which top-level "assembly" object (the one <build>/<assemble> items reference)
-// encloses a given mesh-bearing part, via <object><components><component objectid=.../>.
-// This is the link model_settings.config's per-part `extruder` override needs, since
-// object ids and part/component ids are different id spaces in real Bambu files.
+// Every top-level "assembly" object's own <components><component objectid
+// p:path transform=.../> list, keyed by the enclosing object's id → [{partId,
+// localTransform}]. A mesh-bearing part can be referenced by MORE than one
+// top-level object (Bambu Studio's "duplicate object" reuses the mesh
+// resource rather than copying it), so this is object→components, not a
+// single part→object lookup.
 function parseComponentGraph(modelParts, textByName) {
-  const partToObject = {};
+  const componentsByObject = {};
   for (const name of modelParts) {
     const xml = textByName[name];
     for (const om of xml.matchAll(/<object\b([^>]*)>([\s\S]*?)<\/object>/g)) {
       const objId = attr(om[1], 'id');
-      for (const c of om[2].matchAll(/<component\b[^>]*\bobjectid="(\d+)"/g)) partToObject[c[1]] = objId;
+      const comps = [];
+      for (const c of om[2].matchAll(/<component\b([^>]*?)\/>/g)) {
+        const partId = attr(c[1], 'objectid');
+        if (partId) comps.push({ partId, localTransform: parseTransform(attr(c[1], 'transform')) });
+      }
+      if (comps.length) componentsByObject[objId] = comps;
     }
   }
-  return partToObject;
+  return componentsByObject;
 }
 
-// Metadata/model_settings.config: object-level and part-level `extruder` (base
-// filament slot) overrides. value="0" means "unset" (falls through to the next
-// level, ultimately slot 1).
+// Metadata/model_settings.config: per-object `name` + `extruder` (base filament
+// slot) metadata, and part-level `extruder` overrides *scoped to their enclosing
+// object* (object ids and part ids are different id spaces, and — because of the
+// "duplicate object" mesh reuse above — the same part id can appear inside
+// several different objects with different overrides). value="0" means "unset"
+// (falls through to the object-level value, ultimately slot 1).
 function parseExtruderMetadata(msXml) {
-  const objectExtruder = {}, partExtruder = {};
+  const objectExtruder = {}, objectName = {}, partExtruderByObject = {};
   for (const om of msXml.matchAll(/<object\b([^>]*)>([\s\S]*?)<\/object>/g)) {
     const objId = attr(om[1], 'id');
     const body = om[2];
@@ -176,32 +214,68 @@ function parseExtruderMetadata(msXml) {
     const head = headEnd === -1 ? body : body.slice(0, headEnd);
     const oe = (head.match(/<metadata\s+key="extruder"\s+value="(\d+)"/) || [])[1];
     if (oe && +oe > 0) objectExtruder[objId] = +oe;
+    const on = (head.match(/<metadata\s+key="name"\s+value="([^"]*)"/) || [])[1];
+    if (on) objectName[objId] = on;
+    const parts = {};
     for (const pm of body.matchAll(/<part\b([^>]*)>([\s\S]*?)<\/part>/g)) {
       const partId = attr(pm[1], 'id');
       const pe = (pm[2].match(/<metadata\s+key="extruder"\s+value="(\d+)"/) || [])[1];
-      if (pe && +pe > 0) partExtruder[partId] = +pe;
+      if (pe && +pe > 0) parts[partId] = +pe;
     }
+    partExtruderByObject[objId] = parts;
   }
-  return { objectExtruder, partExtruder };
+  return { objectExtruder, objectName, partExtruderByObject };
+}
+
+// Blank out a plate name that's just Bambu Studio's placeholder for "no name".
+function cleanPlateName(name) {
+  const n = (name || '').trim();
+  return /^untitled$/i.test(n) ? '' : n;
+}
+
+// <assemble><assemble_item object_id transform/></assemble>: per-object world
+// placement for the preview's Assembly view. First instance per object id.
+function parseAssembleItems(msXml) {
+  const out = {};
+  for (const m of msXml.matchAll(/<assemble_item\b([^>]*?)\/>/g)) {
+    const objId = attr(m[1], 'object_id');
+    if (objId && !(objId in out)) out[objId] = parseTransform(attr(m[1], 'transform'));
+  }
+  return out;
+}
+
+// First <build><item objectid transform> per object id — an object may have
+// several build-item instances, but the preview only ever shows one.
+function firstBuildTransformByObject(items) {
+  const out = {};
+  for (const it of items) if (!(it.objectId in out)) out[it.objectId] = parseTransform(it.transform);
+  return out;
 }
 
 // Merge all objects into one vertex/triangle list, resolving each triangle's
-// source color to a normalized hex.
+// source color to a normalized hex. Also keeps each source object's own
+// (un-merged, un-offset) geometry as a `viewParts` entry, for the 3D preview's
+// per-object views (OpenSCAD objects have no components/build-item
+// indirection, so each is its own part at an identity transform).
 function mergeGeometry(groups, objects) {
   const verts = [];
   const tris = []; // { v1, v2, v3, hex }
+  const viewParts = [];
   for (const obj of objects) {
     const base = verts.length;
     for (const v of obj.verts) verts.push(v);
+    const partTris = [];
     for (const t of obj.tris) {
       let g, idx;
       if (t.pid !== undefined && t.p1 !== undefined) { g = t.pid; idx = +t.p1; }
       else { g = obj.pid; idx = obj.pindex !== undefined ? +obj.pindex : 0; }
       const hex = normHex((groups[g] || [])[idx]);
       tris.push({ v1: t.v1 + base, v2: t.v2 + base, v3: t.v3 + base, hex });
+      partTris.push({ v1: t.v1, v2: t.v2, v3: t.v3, hex });
     }
+    viewParts.push({ objId: obj.id, localTransform: IDENTITY_TRANSFORM, verts: obj.verts, tris: partTris });
   }
-  return { verts, tris };
+  return { verts, tris, viewParts };
 }
 
 function uniq(list) {
@@ -246,8 +320,13 @@ function distinctHexes(tris) {
 function buildOpenscad(files) {
   const { groups, objects, title, baseMaterials } = collectGeometry(files);
   if (!objects.length) throw new Error('No mesh geometry found in this 3MF.');
-  const { verts, tris } = mergeGeometry(groups, objects);
-  return { title, verts, tris, paintedColors: distinctHexes(tris), definedColors: uniq(baseMaterials), previewFiles: collectPreviewFiles(files), coverRels: parseCoverRels(files) };
+  const { verts, tris, viewParts } = mergeGeometry(groups, objects);
+  const view = {
+    parts: viewParts,
+    objects: viewParts.map((p, i) => ({ id: p.objId, name: `Object ${i + 1}` })),
+    plates: [], hasAssembly: false, buildTransform: {}, assembleTransform: {},
+  };
+  return { title, verts, tris, paintedColors: distinctHexes(tris), definedColors: uniq(baseMaterials), previewFiles: collectPreviewFiles(files), coverRels: parseCoverRels(files), view };
 }
 
 /**
@@ -284,37 +363,81 @@ function buildBambu(files) {
       hasSupport = String(s.enable_support) === '1';
     } catch { /* ignore */ }
   }
-  // Base filament for a mesh part: its own <part> override, else the enclosing
-  // top-level <object>'s override (found via the component graph, since object
-  // ids and part ids are different id spaces), else slot 1.
-  const partToObject = parseComponentGraph(modelParts, textByName);
-  const { objectExtruder, partExtruder } = parseExtruderMetadata(rawModelSettings);
-  const baseSlotFor = (meshId) => partExtruder[meshId] || objectExtruder[partToObject[meshId]] || 1;
+  // Base filament for a mesh part: its own <part> override (scoped to whichever
+  // top-level object it's being resolved through — see parseExtruderMetadata),
+  // else that top-level object's own override, else slot 1.
+  const componentsByObject = parseComponentGraph(modelParts, textByName);
+  const { objectExtruder, objectName, partExtruderByObject } = parseExtruderMetadata(rawModelSettings);
+  const baseSlotFor = (topId, partId) => (partExtruderByObject[topId] || {})[partId] || objectExtruder[topId] || 1;
   const paletteHex = (slot) => normHex(palette[(slot | 0) - 1]);
+
+  const meshById = {};
+  for (const obj of objects) meshById[obj.id] = obj;
+
+  // Every top-level "assembly" object: one with its own <components> entry, or
+  // (for simple single-object files with no component indirection, e.g.
+  // colored-cube.3mf) a mesh-bearing object that's never itself referenced as
+  // someone else's component.
+  const referencedPartIds = new Set();
+  for (const comps of Object.values(componentsByObject)) for (const c of comps) referencedPartIds.add(c.partId);
+  const topIds = [
+    ...Object.keys(componentsByObject),
+    ...objects.map((o) => o.id).filter((id) => !referencedPartIds.has(id) && !componentsByObject[id]),
+  ];
 
   const verts = [];
   const tris = [];
+  const viewParts = [];
+  const viewObjects = [];
   let complexPaintCount = 0;
-  for (const obj of objects) {
+
+  const emit = (meshObj, topId, partId, localTransform) => {
+    const slot0 = baseSlotFor(topId, partId);
     const base = verts.length;
-    for (const v of obj.verts) verts.push(v);
-    const objBaseSlot = baseSlotFor(obj.id);
-    for (const t of obj.tris) {
-      let slot = objBaseSlot;
+    for (const v of meshObj.verts) verts.push(v);
+    const partTris = [];
+    for (const t of meshObj.tris) {
+      let slot = slot0;
       if (t.paint !== undefined) {
         const d = decodePaintSlot(t.paint);
         if (d.known) slot = d.slot; else complexPaintCount++; // flatten unknown → base
       }
-      tris.push({ v1: t.v1 + base, v2: t.v2 + base, v3: t.v3 + base, hex: paletteHex(slot) });
+      const hex = paletteHex(slot);
+      tris.push({ v1: t.v1 + base, v2: t.v2 + base, v3: t.v3 + base, hex });
+      partTris.push({ v1: t.v1, v2: t.v2, v3: t.v3, hex });
+    }
+    viewParts.push({ objId: topId, localTransform, verts: meshObj.verts, tris: partTris });
+  };
+
+  for (const topId of topIds) {
+    viewObjects.push({ id: topId, name: objectName[topId] || `Object ${viewObjects.length + 1}` });
+    const comps = componentsByObject[topId];
+    if (comps) {
+      for (const c of comps) { const meshObj = meshById[c.partId]; if (meshObj) emit(meshObj, topId, c.partId, c.localTransform); }
+    } else {
+      const meshObj = meshById[topId];
+      if (meshObj) emit(meshObj, topId, topId, IDENTITY_TRANSFORM);
     }
   }
+
+  const rootXml = textByName[modelParts[0]];
+  const buildTransform = firstBuildTransformByObject(parseBuildItems(rootXml));
+  const assembleTransform = parseAssembleItems(rawModelSettings);
+  const plates = parsePlateGroups(rawModelSettings)
+    .filter((p) => p.objectIds.length)
+    .map((p) => ({ id: String(p.platerId), name: cleanPlateName(p.platerName), objectIds: p.objectIds }));
+  const view = {
+    parts: viewParts, objects: viewObjects, plates,
+    hasAssembly: Object.keys(assembleTransform).length > 0,
+    buildTransform, assembleTransform,
+  };
 
   return {
     kind: 'bambu', title, verts, tris,
     paintedColors: distinctHexes(tris), definedColors: palette.slice(),
     rawProjectSettings, rawSliceInfo, hasSupport, complexPaintCount,
     previewFiles: collectPreviewFiles(files), coverRels: parseCoverRels(files),
-    rawFiles: files,
+    rawFiles: files, view,
   };
 }
 
@@ -684,8 +807,9 @@ function parsePlateGroups(msXml) {
   for (const pm of msXml.matchAll(/<plate>([\s\S]*?)<\/plate>/g)) {
     const body = pm[1];
     const platerId = +((body.match(/<metadata\s+key="plater_id"\s+value="(\d+)"/) || [])[1] || 0);
+    const platerName = (body.match(/<metadata\s+key="plater_name"\s+value="([^"]*)"/) || [])[1] || '';
     const objectIds = [...body.matchAll(/<model_instance>[\s\S]*?<metadata\s+key="object_id"\s+value="(\d+)"/g)].map((m) => m[1]);
-    plates.push({ platerId, objectIds });
+    plates.push({ platerId, platerName, objectIds });
   }
   plates.sort((a, b) => a.platerId - b.platerId);
   return plates;
