@@ -2,8 +2,8 @@
 // matrix → Export. Multiple files are edited one at a time (a queue); an
 // "Apply to all" checkbox best-effort applies the current settings to the rest.
 import {
-  parseAnyProject, defaultSwatches, mappingForSwatches, buildProjectBytes,
-  chooseProjectSettings, outputName, DEFAULT_SUFFIX,
+  parseAnyProject, defaultSwatches, mappingForSwatches, buildOutputBytes,
+  outputName, DEFAULT_SUFFIX,
 } from './convert.js';
 import { Viewer } from './viewer.js';
 import { MappingMatrix } from './matrix.js';
@@ -25,6 +25,11 @@ const applyAll = $('applyAll');
 const exportBtn = $('export');
 const modeInput = $('mode-input');
 const modeOutput = $('mode-output');
+const viewAssemblyBtn = $('view-assembly');
+const plateDd = $('plate-dd');
+const plateDdBtn = $('plate-dd-btn');
+const plateDdList = $('plate-dd-list');
+const viewObjectSel = $('view-object');
 
 let viewer = null;
 let matrix = null;
@@ -32,7 +37,95 @@ let queue = [];        // File[]
 let idx = 0;
 let current = null;    // parsed project for queue[idx]
 let mode = 'output';   // 'input' | 'output'
+let currentView = null; // current.view (Assembly/Plate/Object preview data)
+let viewMode = { type: 'all' }; // { type: 'assembly' | 'plate' | 'object' | 'all', id? }
 let converted = 0;
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function plateIconSvg(label) {
+  return `<svg viewBox="0 0 24 24" width="18" height="18"><rect x="2.5" y="2.5" width="19" height="19" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="12" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="currentColor">${escapeHtml(label)}</text></svg>`;
+}
+
+function plateRowHtml(plate) {
+  return plateIconSvg(plate.id) + (plate.name ? `<span class="plate-name">${escapeHtml(plate.name)}</span>` : '');
+}
+
+// Bambu Studio's "duplicate object" operation gives several distinct
+// top-level objects the same source name (e.g. 4 copies of one clip) — number
+// them so the Objects dropdown doesn't show identical, unpickable entries.
+function disambiguateNames(objects) {
+  const counts = {};
+  for (const o of objects) counts[o.name] = (counts[o.name] || 0) + 1;
+  const seen = {};
+  return objects.map((o) => {
+    if (counts[o.name] <= 1) return o;
+    seen[o.name] = (seen[o.name] || 0) + 1;
+    return { ...o, name: `${o.name} (${seen[o.name]})` };
+  });
+}
+
+function defaultModeFor(view) {
+  if (view.hasAssembly) return { type: 'assembly' };
+  if (view.plates.length) return { type: 'plate', id: view.plates[0].id };
+  return { type: 'all' };
+}
+
+function closePlateDd() {
+  plateDdList.hidden = true;
+  plateDdBtn.setAttribute('aria-expanded', 'false');
+}
+
+function togglePlateDd() {
+  const opening = plateDdList.hidden;
+  plateDdList.hidden = !opening;
+  plateDdBtn.setAttribute('aria-expanded', String(opening));
+}
+
+function updateViewModeUI(m) {
+  viewAssemblyBtn.classList.toggle('active', m.type === 'assembly');
+  const activePlate = m.type === 'plate';
+  plateDdBtn.classList.toggle('active', activePlate);
+  plateDdBtn.innerHTML = activePlate ? plateRowHtml(currentView.plates.find((p) => p.id === m.id) || {}) : 'Plates';
+  viewObjectSel.value = m.type === 'object' ? m.id : '__all__';
+}
+
+// User picked a view (assembly button / plate row / object select) for the
+// project already loaded in the viewer.
+function applyViewMode(m) {
+  viewMode = m;
+  viewer.setViewMode(m);
+  updateViewModeUI(m);
+}
+
+// New file loaded: populate the controls for its structure and pick the
+// default view (Assembly > first Plate > Object "All"), without touching the
+// viewer — the caller still needs to setProject() with this file's geometry.
+function setupViewControls(view) {
+  currentView = view;
+  viewAssemblyBtn.hidden = !view.hasAssembly;
+  plateDd.hidden = !view.plates.length;
+  viewObjectSel.hidden = view.objects.length <= 1;
+
+  plateDdList.innerHTML = '';
+  for (const plate of view.plates) {
+    const li = document.createElement('li');
+    li.setAttribute('role', 'option');
+    li.dataset.id = plate.id;
+    li.innerHTML = plateRowHtml(plate);
+    li.addEventListener('click', () => { applyViewMode({ type: 'plate', id: plate.id }); closePlateDd(); });
+    plateDdList.appendChild(li);
+  }
+  closePlateDd();
+
+  viewObjectSel.innerHTML = '<option value="__all__">All</option>'
+    + disambiguateNames(view.objects).map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name)}</option>`).join('');
+
+  viewMode = defaultModeFor(view);
+  updateViewModeUI(viewMode);
+}
 
 function setStatus(msg, kind = '') { status.className = kind; status.textContent = msg; }
 
@@ -94,7 +187,8 @@ async function loadCurrent() {
   result.hidden = true;
 
   if (!viewer) viewer = new Viewer(canvas);
-  viewer.setModel(current.verts, current.tris);
+  setupViewControls(current.view);
+  viewer.setProject(current.view, viewMode);
 
   const swatches = defaultSwatches(current.definedColors, current.paintedColors);
   const colorToSlot = mappingForSwatches(current.paintedColors, swatches);
@@ -127,14 +221,7 @@ function updateEditInfo() {
 // Build output bytes for a parsed project, honoring the Target Printer dropdown.
 async function buildBytesFor(parsed, swatches, colorToSlot) {
   const [u1Base, u1Supports] = await templatesReady;
-  const target = targetSel.value; // 'keep' | 'u1'
-  const projectSettingsTemplate = chooseProjectSettings(parsed, target, { u1Base, u1Supports });
-  const sliceInfoTemplate = (parsed.kind === 'bambu' && target === 'keep') ? parsed.rawSliceInfo : null;
-  return buildProjectBytes({
-    title: parsed.title, verts: parsed.verts, tris: parsed.tris,
-    colorToSlot, swatches, projectSettingsTemplate, sliceInfoTemplate,
-    preserveFiles: parsed.previewFiles, coverRels: parsed.coverRels,
-  });
+  return buildOutputBytes(parsed, { colorToSlot, swatches, target: targetSel.value, u1Base, u1Supports });
 }
 
 async function exportCurrent() {
@@ -205,6 +292,13 @@ fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); e.tar
 
 modeInput.addEventListener('click', () => setMode('input'));
 modeOutput.addEventListener('click', () => setMode('output'));
+viewAssemblyBtn.addEventListener('click', () => applyViewMode({ type: 'assembly' }));
+plateDdBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlateDd(); });
+document.addEventListener('click', (e) => { if (!plateDd.contains(e.target)) closePlateDd(); });
+viewObjectSel.addEventListener('change', () => {
+  const v = viewObjectSel.value;
+  applyViewMode(v === '__all__' ? { type: 'all' } : { type: 'object', id: v });
+});
 applyAll.addEventListener('change', refreshExportLabel);
 targetSel.addEventListener('change', updateEditInfo);
 exportBtn.addEventListener('click', onExport);

@@ -1,8 +1,10 @@
-// Minimal three.js viewer for the mapping editor. Renders the merged mesh with
-// flat per-triangle colors, supports orbit, recoloring (input vs output view),
-// and highlighting the triangles of one input color.
+// Minimal three.js viewer for the mapping editor. Renders flat per-triangle
+// colors, supports orbit, recoloring (input vs output view), highlighting the
+// triangles of one input color, and switching between the project's Assembly /
+// Plate / Object preview views (see setProject/setViewMode).
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { IDENTITY_TRANSFORM, composeTransform, applyTransform } from './convert.js';
 
 const DIM = 0.12; // brightness of non-highlighted triangles when highlighting
 
@@ -35,6 +37,8 @@ export class Viewer {
 
     this.mesh = null;
     this.tris = [];
+    this.view = null;
+    this.mode = { type: 'all' };
     this.provider = (t) => t.hex;
     this.highlightHex = null;
 
@@ -58,23 +62,66 @@ export class Viewer {
     this.camera.updateProjectionMatrix();
   }
 
-  setModel(verts, tris) {
+  // `view` is the `view` field of a parsed project (parseAnyProject): { parts,
+  // objects, plates, hasAssembly, buildTransform, assembleTransform }.
+  setProject(view, mode) {
+    this.view = view;
+    this.setViewMode(mode);
+  }
+
+  // mode: { type: 'assembly' } | { type: 'plate', id } | { type: 'object', id } | { type: 'all' }
+  setViewMode(mode) {
+    this.mode = mode;
+    this._rebuild();
+  }
+
+  // Which parts are visible for the current mode, and the world transform to
+  // apply to each (composed with the part's own local/component transform).
+  _partsForMode() {
+    const view = this.view;
+    if (!view) return [];
+    const { type, id } = this.mode;
+    if (type === 'plate') {
+      const plate = view.plates.find((p) => p.id === id);
+      const ids = new Set(plate ? plate.objectIds : []);
+      return view.parts.filter((p) => ids.has(p.objId)).map((p) => ({ part: p, world: view.buildTransform[p.objId] || IDENTITY_TRANSFORM }));
+    }
+    if (type === 'assembly') {
+      return view.parts.map((p) => ({ part: p, world: view.assembleTransform[p.objId] || IDENTITY_TRANSFORM }));
+    }
+    if (type === 'object') {
+      return view.parts.filter((p) => p.objId === id).map((p) => ({ part: p, world: IDENTITY_TRANSFORM }));
+    }
+    return view.parts.map((p) => ({ part: p, world: IDENTITY_TRANSFORM })); // 'all'
+  }
+
+  _rebuild() {
     if (this.mesh) {
       this.scene.remove(this.mesh);
       this.mesh.geometry.dispose();
       this.mesh.material.dispose();
+      this.mesh = null;
+    }
+    const placed = this._partsForMode();
+    const tris = [];
+    let n = 0;
+    for (const { part } of placed) n += part.tris.length;
+    const pos = new Float32Array(n * 9);
+    this.colors = new Float32Array(n * 9);
+
+    let i = 0;
+    for (const { part, world } of placed) {
+      const m = composeTransform(part.localTransform, world);
+      const wv = part.verts.map((v) => applyTransform(v, m));
+      for (const t of part.tris) {
+        const a = wv[t.v1], b = wv[t.v2], c = wv[t.v3];
+        pos.set([a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]], i * 9);
+        tris.push(t);
+        i++;
+      }
     }
     this.tris = tris;
 
-    // Non-indexed geometry: 3 unique vertices per triangle → flat per-face color.
-    const n = tris.length;
-    const pos = new Float32Array(n * 9);
-    this.colors = new Float32Array(n * 9);
-    for (let i = 0; i < n; i++) {
-      const t = tris[i];
-      const a = verts[t.v1], b = verts[t.v2], c = verts[t.v3];
-      pos.set([a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]], i * 9);
-    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));

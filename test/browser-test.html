@@ -69,7 +69,7 @@
         try {
           const { Viewer } = await import('/src/viewer.js');
           const v = new Viewer(document.getElementById('canvas'));
-          v.setModel(p.verts, p.tris);
+          v.setProject(p.view, { type: 'all' });
           v.setProvider((t) => t.hex);
           v.setHighlight(p.paintedColors[0]);
           ok(v.mesh && v.mesh.geometry.attributes.color.count === 3228 * 3, `viewer colors=${v.mesh.geometry.attributes.color.count}`);

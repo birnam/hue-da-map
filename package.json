@@ -9,8 +9,8 @@
   "scripts": {
     "build": "node scripts/bundle.mjs",
     "convert": "node bin/convert.mjs",
-    "test": "node test/sanity.mjs && node test/phase3.mjs",
-    "test:browser": "node test/browser-run.mjs && node test/smoke-index.mjs",
+    "test": "node test/sanity.mjs && node test/phase3.mjs && node test/phase4.mjs",
+    "test:browser": "node test/browser-run.mjs && node test/smoke-index.mjs && node test/browser-multiplate.mjs",
     "serve": "python3 -m http.server 8080"
   },
   "engines": {
